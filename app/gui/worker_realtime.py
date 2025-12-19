@@ -1,3 +1,7 @@
+# Only the changed part is relevant: this file is provided as a replacement.
+# If you already have worker_realtime.py from the previous realtime milestone,
+# you can keep it. This version just adds extra keys in sig_data for better 2D dashboard.
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,12 +36,11 @@ class SimConfig:
 
 
 class RealtimeWorker(QThread):
-    """Realtime simulation (smooth plots like Milestone 5) + supports BOTH (PID vs MPC synchronized)."""
     sig_status = Signal(str)
     sig_data = Signal(dict)
     sig_done = Signal(dict)
 
-    def __init__(self, cfg: SimConfig, mode: str = "BOTH", plot_hz: float = 50.0, window_s: float = 3.0):
+    def __init__(self, cfg: SimConfig, mode: str = "BOTH", plot_hz: float = 60.0, window_s: float = 3.0):
         super().__init__()
         self.cfg = cfg
         self.mode = mode.upper()
@@ -105,12 +108,9 @@ class RealtimeWorker(QThread):
         next_plot_t = 0.0
         max_points = int(self.window_s / Ts) + 5
 
-        log_pid = []
-        log_mpc = []
+        log_pid, log_mpc = [], []
         iq_ref_pid = 0.0
         iq_ref_mpc = 0.0
-        omega_e_pid = 0.0
-        omega_e_mpc = 0.0
 
         t0 = 0.0
 
@@ -139,6 +139,7 @@ class RealtimeWorker(QThread):
                 sol = mpc_ctl.step(w0=y["omega_m"], wref_seq=wref_seq, A=A, B=B, G=G, d_seq=d_seq)
                 iq_ref_mpc = sol["iq_ref"]
 
+            # inner integration
             for j in range(n_inner):
                 t = t0 + j * dt_e
                 TL = load_torque(t)
@@ -149,13 +150,12 @@ class RealtimeWorker(QThread):
                     psi_r_mag = float(np.hypot(y["psi_dr"], y["psi_qr"]))
                     omega_r_e = p1.p * y["omega_m"]
                     omega_sl = (k_slip_1 * iqs / psi_r_mag) if psi_r_mag > eps_psi else 0.0
-                    omega_e_pid = omega_r_e + omega_sl
-
-                    u = cur_pid.step(id_ref=id_ref(t), iq_ref=iq_ref_pid, id_meas=ids, iq_meas=iqs, omega_e=omega_e_pid, dt=dt_e)
+                    omega_e = omega_r_e + omega_sl
+                    u = cur_pid.step(id_ref=id_ref(t), iq_ref=iq_ref_pid, id_meas=ids, iq_meas=iqs, omega_e=omega_e, dt=dt_e)
                     vd, vq = u["vd"], u["vq"]
 
                     def fx(xx):
-                        return motor_pid.f(xx, vd, vq, omega_e_pid, TL)
+                        return motor_pid.f(xx, vd, vq, omega_e, TL)
                     motor_pid.x = rk4_step(fx, motor_pid.x, dt_e)
 
                 if self.mode in ("MPC", "BOTH"):
@@ -164,15 +164,15 @@ class RealtimeWorker(QThread):
                     psi_r_mag = float(np.hypot(y["psi_dr"], y["psi_qr"]))
                     omega_r_e = p2.p * y["omega_m"]
                     omega_sl = (k_slip_2 * iqs / psi_r_mag) if psi_r_mag > eps_psi else 0.0
-                    omega_e_mpc = omega_r_e + omega_sl
-
-                    u = cur_mpc.step(id_ref=id_ref(t), iq_ref=iq_ref_mpc, id_meas=ids, iq_meas=iqs, omega_e=omega_e_mpc, dt=dt_e)
+                    omega_e = omega_r_e + omega_sl
+                    u = cur_mpc.step(id_ref=id_ref(t), iq_ref=iq_ref_mpc, id_meas=ids, iq_meas=iqs, omega_e=omega_e, dt=dt_e)
                     vd, vq = u["vd"], u["vq"]
 
                     def fx2(xx):
-                        return motor_mpc.f(xx, vd, vq, omega_e_mpc, TL)
+                        return motor_mpc.f(xx, vd, vq, omega_e, TL)
                     motor_mpc.x = rk4_step(fx2, motor_mpc.x, dt_e)
 
+            # log
             if self.mode in ("PID", "BOTH"):
                 y = motor_pid.outputs(motor_pid.x)
                 log_pid.append({
@@ -181,7 +181,6 @@ class RealtimeWorker(QThread):
                     "omega_rpm": y["omega_m"] * 60.0 / (2*np.pi),
                     "iq_ref": iq_ref_pid,
                     "iq": y["iqs"],
-                    "id": y["ids"],
                     "Te": y["Te"],
                     "T_L": TL_now,
                 })
@@ -193,7 +192,6 @@ class RealtimeWorker(QThread):
                     "omega_rpm": y["omega_m"] * 60.0 / (2*np.pi),
                     "iq_ref": iq_ref_mpc,
                     "iq": y["iqs"],
-                    "id": y["ids"],
                     "Te": y["Te"],
                     "T_L": TL_now,
                 })
@@ -203,31 +201,37 @@ class RealtimeWorker(QThread):
 
                 def recent(log):
                     if not log:
-                        return np.array([]), np.array([]), np.array([]), np.array([])
+                        return (np.array([]),)*6
                     r = log[-max_points:]
                     t = np.array([x["t"] for x in r], dtype=float)
                     w = np.array([x["omega_rpm"] for x in r], dtype=float)
                     wref = np.array([x["omega_ref_rpm"] for x in r], dtype=float)
                     iqref = np.array([x["iq_ref"] for x in r], dtype=float)
-                    return t, w, wref, iqref
+                    te = np.array([x["Te"] for x in r], dtype=float)
+                    tl = np.array([x["T_L"] for x in r], dtype=float)
+                    return t, w, wref, iqref, te, tl
 
-                t_pid, w_pid, wref_pid, iq_pid = recent(log_pid)
-                t_mpc, w_mpc, wref_mpc, iq_mpc = recent(log_mpc)
+                t_pid, w_pid, wref_pid, iqref_pid, te_pid, tl_pid = recent(log_pid)
+                t_mpc, w_mpc, wref_mpc, iqref_mpc, te_mpc, tl_mpc = recent(log_mpc)
 
                 t_ref = t_pid if wref_pid.size else t_mpc
                 wref_plot = wref_pid if wref_pid.size else wref_mpc
 
+                def last(a, default=0.0):
+                    return float(a[-1]) if getattr(a, "size", 0) else float(default)
+
                 self.sig_data.emit({
                     "t_ref": t_ref,
                     "omega_ref": wref_plot,
-                    "t_pid": t_pid,
-                    "omega_pid": w_pid,
-                    "iqref_pid": iq_pid,
-                    "t_mpc": t_mpc,
-                    "omega_mpc": w_mpc,
-                    "iqref_mpc": iq_mpc,
-                })
 
+                    "t_pid": t_pid, "omega_pid": w_pid, "iqref_pid": iqref_pid,
+                    "t_mpc": t_mpc, "omega_mpc": w_mpc, "iqref_mpc": iqref_mpc,
+
+                    "te_pid_now": last(te_pid), "te_mpc_now": last(te_mpc),
+                    "tl_now": last(tl_mpc) if tl_mpc.size else last(tl_pid),
+                    "iq_limit": iq_lim,
+                    "mode": self.mode,
+                })
                 time.sleep(0.001)
 
             t0 += Ts

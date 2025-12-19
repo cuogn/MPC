@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QHBoxLayout, QVBoxLayout, QFormLayout,
     QPushButton, QLabel, QDoubleSpinBox, QSpinBox, QGroupBox,
-    QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem
+    QFileDialog, QMessageBox
 )
 import pyqtgraph as pg
 import pandas as pd
@@ -13,12 +13,14 @@ from datetime import datetime
 import os
 
 from app.gui.worker_realtime import RealtimeWorker, SimConfig
+from app.gui.schematic_2d import Schematic2DView
+from app.gui.metrics_panel import MetricsPanel
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("IM Speed Control Demo — PID vs MPC (Milestone 6 — Realtime)")
+        self.setWindowTitle("IM Speed Control Demo — PID vs MPC (2D Dashboard)")
 
         self.worker: RealtimeWorker | None = None
         self.last_pid: pd.DataFrame | None = None
@@ -28,12 +30,14 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._connect()
         self._update_enable()
+        self.resize(1280, 760)
 
     def _build_ui(self):
         root = QWidget()
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
 
+        # ---------------- Left: Controls ----------------
         left = QVBoxLayout()
         layout.addLayout(left, 0)
 
@@ -85,37 +89,42 @@ class MainWindow(QMainWindow):
         self.btn_stop = QPushButton("Stop")
         self.btn_reset = QPushButton("Reset")
         self.btn_export = QPushButton("Export Bundle")
-        self.lbl_status = QLabel("Status: help: run PID/MPC/BOTH")
+        self.lbl_status = QLabel("Status: ready")
         self.lbl_status.setWordWrap(True)
 
         for b in (self.btn_run_pid, self.btn_run_mpc, self.btn_run_both, self.btn_stop, self.btn_reset, self.btn_export):
             run_layout.addWidget(b)
         run_layout.addWidget(self.lbl_status)
 
-        met_box = QGroupBox("Metrics (after ω* step)")
-        met_layout = QVBoxLayout(met_box)
-        self.tbl_metrics = QTableWidget(0, 3)
-        self.tbl_metrics.setHorizontalHeaderLabels(["Metric", "PID", "MPC"])
-        self.tbl_metrics.horizontalHeader().setStretchLastSection(True)
-        met_layout.addWidget(self.tbl_metrics)
+        # NEW: readable metrics panel
+        self.metrics_panel = MetricsPanel()
 
         left.addWidget(scen_box)
         left.addWidget(pid_box)
         left.addWidget(mpc_box)
         left.addWidget(preset_box)
         left.addWidget(run_box)
-        left.addWidget(met_box)
+        left.addWidget(self.metrics_panel)
         left.addStretch(1)
 
+        # Make left column a bit wider so labels and metrics are readable
+        root.setMinimumWidth(1200)
+
+        # ---------------- Right: Dashboard + Plots ----------------
         right = QVBoxLayout()
         layout.addLayout(right, 1)
 
         pg.setConfigOptions(antialias=True)
 
+        self.schematic = Schematic2DView()
+        right.addWidget(self.schematic, 0)
+
         self.plot_speed = pg.PlotWidget(title="Speed")
         self.plot_speed.setLabel("left", "rpm")
         self.plot_speed.setLabel("bottom", "time", units="s")
         self.plot_speed.showGrid(x=True, y=True)
+        self.plot_speed.setDownsampling(auto=True, mode="peak")
+        self.plot_speed.setClipToView(True)
         self.curve_omega_pid = self.plot_speed.plot([], [], name="PID ω")
         self.curve_omega_mpc = self.plot_speed.plot([], [], name="MPC ω")
         self.curve_omega_ref = self.plot_speed.plot([], [], pen=pg.mkPen(style=Qt.DashLine), name="ω*")
@@ -124,6 +133,8 @@ class MainWindow(QMainWindow):
         self.plot_iq.setLabel("left", "A")
         self.plot_iq.setLabel("bottom", "time", units="s")
         self.plot_iq.showGrid(x=True, y=True)
+        self.plot_iq.setDownsampling(auto=True, mode="peak")
+        self.plot_iq.setClipToView(True)
         self.curve_iq_pid = self.plot_iq.plot([], [], name="PID i_q*")
         self.curve_iq_mpc = self.plot_iq.plot([], [], name="MPC i_q*")
 
@@ -166,7 +177,8 @@ class MainWindow(QMainWindow):
         if self.worker is not None and self.worker.is_running:
             return
         cfg = self._gather_config()
-        self.worker = RealtimeWorker(cfg, mode=mode, plot_hz=50.0, window_s=3.0)
+        # a touch smoother plot refresh
+        self.worker = RealtimeWorker(cfg, mode=mode, plot_hz=60.0, window_s=3.0)
         self.worker.sig_status.connect(self.on_status)
         self.worker.sig_data.connect(self.on_data)
         self.worker.sig_done.connect(self.on_done)
@@ -190,8 +202,9 @@ class MainWindow(QMainWindow):
         self.last_metrics = None
         for c in (self.curve_omega_pid, self.curve_omega_mpc, self.curve_omega_ref, self.curve_iq_pid, self.curve_iq_mpc):
             c.setData([], [])
-        self.tbl_metrics.setRowCount(0)
-        self.on_status("idle")
+        self.metrics_panel.clear()
+        self.on_status("ready")
+        self.schematic.update_state(mode="—", rpm_ref=0, rpm_pid=0, rpm_mpc=0, iq_ref_pid=0, iq_ref_mpc=0, te_pid=0, te_mpc=0, tl=0, iq_limit=float(self.sp_iq_lim.value()))
         self._update_enable()
 
     @Slot(str)
@@ -200,6 +213,7 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_data(self, payload: dict):
+        # plots
         if payload.get("t_ref") is not None and len(payload["t_ref"]) > 0:
             self.curve_omega_ref.setData(payload["t_ref"], payload["omega_ref"])
 
@@ -217,55 +231,43 @@ class MainWindow(QMainWindow):
             self.curve_omega_mpc.setData([], [])
             self.curve_iq_mpc.setData([], [])
 
+        # schematic: derive last PID/MPC values from arrays if present
+        def last(arr, default=0.0):
+            return float(arr[-1]) if hasattr(arr, "__len__") and len(arr) else float(default)
+
+        rpm_ref = last(payload.get("omega_ref", []), 0.0)
+        rpm_pid = last(payload.get("omega_pid", []), 0.0)
+        rpm_mpc = last(payload.get("omega_mpc", []), 0.0)
+        iqref_pid = last(payload.get("iqref_pid", []), 0.0)
+        iqref_mpc = last(payload.get("iqref_mpc", []), 0.0)
+
+        self.schematic.update_state(
+            mode=str(payload.get("mode", "BOTH")),
+            rpm_ref=rpm_ref,
+            rpm_pid=rpm_pid,
+            rpm_mpc=rpm_mpc,
+            iq_ref_pid=iqref_pid,
+            iq_ref_mpc=iqref_mpc,
+            te_pid=float(payload.get("te_pid_now", 0.0)),
+            te_mpc=float(payload.get("te_mpc_now", 0.0)),
+            tl=float(payload.get("tl_now", 0.0)),
+            iq_limit=float(payload.get("iq_limit", float(self.sp_iq_lim.value()))),
+        )
+
     @Slot(dict)
     def on_done(self, payload: dict):
         self.last_pid = payload.get("pid")
         self.last_mpc = payload.get("mpc")
         self.last_metrics = payload.get("metrics")
-        self._fill_metrics_table(self.last_metrics)
+        self.metrics_panel.set_metrics(self.last_metrics)
         self._update_enable()
-
-    def _fill_metrics_table(self, mdf: pd.DataFrame | None):
-        self.tbl_metrics.setRowCount(0)
-        if mdf is None or len(mdf) == 0:
-            return
-
-        metrics = ["rmse_rpm", "ise", "itae", "overshoot_%", "settling_s", "final_speed_rpm"]
-        pretty = {
-            "rmse_rpm": "RMSE (rpm)",
-            "ise": "ISE",
-            "itae": "ITAE",
-            "overshoot_%": "Overshoot (%)",
-            "settling_s": "Settling time 2% (s)",
-            "final_speed_rpm": "Final speed (rpm)",
-        }
-
-        pid_row = mdf[mdf["controller"] == "PID"].iloc[0] if (mdf["controller"] == "PID").any() else None
-        mpc_row = mdf[mdf["controller"] == "MPC"].iloc[0] if (mdf["controller"] == "MPC").any() else None
-
-        self.tbl_metrics.setRowCount(len(metrics))
-
-        def fmt(v):
-            if v is None: return "-"
-            try:
-                vv = float(v)
-                if vv == float("inf"): return "inf"
-                if abs(vv) >= 1000: return f"{vv:.1f}"
-                if abs(vv) >= 10: return f"{vv:.3f}"
-                return f"{vv:.4f}"
-            except Exception:
-                return str(v)
-
-        for r, key in enumerate(metrics):
-            self.tbl_metrics.setItem(r, 0, QTableWidgetItem(pretty.get(key, key)))
-            self.tbl_metrics.setItem(r, 1, QTableWidgetItem(fmt(pid_row[key]) if pid_row is not None and key in pid_row else "-"))
-            self.tbl_metrics.setItem(r, 2, QTableWidgetItem(fmt(mpc_row[key]) if mpc_row is not None and key in mpc_row else "-"))
 
     @Slot()
     def on_save_preset(self):
         cfg = self._gather_config().__dict__
         path, _ = QFileDialog.getSaveFileName(self, "Save preset", "preset.json", "JSON Files (*.json)")
-        if not path: return
+        if not path:
+            return
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, indent=2)
@@ -276,7 +278,8 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_load_preset(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load preset", "", "JSON Files (*.json)")
-        if not path: return
+        if not path:
+            return
         try:
             with open(path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
@@ -304,7 +307,8 @@ class MainWindow(QMainWindow):
         os.makedirs("outputs", exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         base_dir = QFileDialog.getExistingDirectory(self, "Choose parent folder", "outputs")
-        if not base_dir: return
+        if not base_dir:
+            return
         out_dir = os.path.join(base_dir, f"run_{ts}")
         os.makedirs(out_dir, exist_ok=True)
 
