@@ -44,11 +44,11 @@ class Schematic2DView(QGraphicsView):
 
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
-        self.setMinimumHeight(300)
+        self.setMinimumHeight(420)
 
         self.state = SchematicState()
 
-        self.W, self.H = 980, 310
+        self.W, self.H = 980, 420
         self.scene.setSceneRect(0, 0, self.W, self.H)
 
         self._build()
@@ -69,24 +69,24 @@ class Schematic2DView(QGraphicsView):
         pen_box = QPen(self.col_fg, 2)
         brush_box = QBrush(self.col_panel)
 
-        s.addRect(QRectF(40, 110, 170, 95), pen_box, brush_box)
+        s.addRect(QRectF(40, 210, 170, 95), pen_box, brush_box)
         t = s.addText("INVERTER\n(vd, vq)")
         t.setDefaultTextColor(self.col_fg)
-        t.setPos(75, 132)
+        t.setPos(75, 232)
 
-        # motor: stator + rotor
-        s.addEllipse(QRectF(320, 65, 180, 180), QPen(self.col_fg, 2), QBrush(Qt.black))
-        s.addEllipse(QRectF(360, 105, 100, 100), QPen(self.col_wire, 2), QBrush(Qt.black))
+        # motor: stator + rotor (centered lower to avoid text overlap)
+        s.addEllipse(QRectF(330, 170, 160, 160), QPen(self.col_fg, 2), QBrush(Qt.black))
+        s.addEllipse(QRectF(365, 205, 90, 90), QPen(self.col_wire, 2), QBrush(Qt.black))
         mt = s.addText("IM\nMotor")
         mt.setDefaultTextColor(self.col_fg)
-        mt.setPos(395, 135)
+        mt.setPos(395, 235)
 
-        # shaft + load
-        s.addLine(500, 155, 705, 155, QPen(self.col_wire, 4))
-        s.addRect(QRectF(705, 110, 210, 95), pen_box, brush_box)
+        # shaft + load (adjusted for motor position)
+        s.addLine(500, 250, 705, 250, QPen(self.col_wire, 4))
+        s.addRect(QRectF(705, 205, 210, 95), pen_box, brush_box)
         lt = s.addText("LOAD\n(TL)")
         lt.setDefaultTextColor(self.col_fg)
-        lt.setPos(785, 132)
+        lt.setPos(785, 227)
 
         # arrows
         self.arrow_i_pid = s.addPolygon(QPolygonF(), QPen(self.col_pid, 1), QBrush(self.col_pid))
@@ -94,43 +94,44 @@ class Schematic2DView(QGraphicsView):
         self.arrow_t_pid = s.addPolygon(QPolygonF(), QPen(self.col_pid, 1), QBrush(self.col_pid))
         self.arrow_t_mpc = s.addPolygon(QPolygonF(), QPen(self.col_mpc, 1), QBrush(self.col_mpc))
 
-        # labels for arrows
+        # labels for arrows (aligned to arrow midpoints)
         self.lbl_i = s.addText("i_q*")
         self.lbl_i.setDefaultTextColor(self.col_fg)
-        self.lbl_i.setPos(235, 85)
+        self.lbl_i.setPos(245, 244)
         self.lbl_t = s.addText("T_e")
         self.lbl_t.setDefaultTextColor(self.col_fg)
-        self.lbl_t.setPos(560, 200)
+        self.lbl_t.setPos(560, 272)
 
-        # gauge
-        s.addEllipse(QRectF(300, 10, 220, 220), QPen(self.col_wire, 2))
-        self.needle_ref = s.addLine(410, 120, 410, 30, QPen(self.col_ref, 2, Qt.DashLine))
-        self.needle_pid = s.addLine(410, 120, 410, 45, QPen(self.col_pid, 3))
-        self.needle_mpc = s.addLine(410, 120, 410, 55, QPen(self.col_mpc, 3))
+        # gauge (centered, larger gap from top panels)
+        s.addEllipse(QRectF(270, 100, 280, 280), QPen(self.col_wire, 2))
+        self.needle_ref = s.addLine(410, 240, 410, 120, QPen(self.col_ref, 2, Qt.DashLine))
+        self.needle_pid = s.addLine(410, 240, 410, 140, QPen(self.col_pid, 3))
+        self.needle_mpc = s.addLine(410, 240, 410, 150, QPen(self.col_mpc, 3))
 
         gl = s.addText("Speed (rpm)")
         gl.setDefaultTextColor(self.col_fg)
-        gl.setPos(382, 235)
+        gl.setPos(372, 330)
 
-        # bars panel
-        s.addRect(QRectF(40, 15, 250, 80), QPen(self.col_wire, 1), QBrush(Qt.black))
+        # bars panel (Mode info - left top)
+        s.addRect(QRectF(25, 15, 290, 110), QPen(self.col_wire, 1), QBrush(Qt.black))
         self.txt = s.addText("")
         self.txt.setDefaultTextColor(self.col_fg)
-        self.txt.setFont(QFont("Consolas", 10))
-        self.txt.setPos(55, 22)
+        self.txt.setFont(QFont("Consolas", 9))
+        self.txt.setPos(38, 24)
 
-        # iq bars
-        s.addRect(QRectF(540, 20, 375, 70), QPen(self.col_wire, 1), QBrush(Qt.black))
+        # Commands panel (right top) - same height as Mode panel
+        s.addRect(QRectF(525, 15, 430, 130), QPen(self.col_wire, 1), QBrush(Qt.black))
         label = s.addText("Commands")
         label.setDefaultTextColor(self.col_fg)
-        label.setPos(550, 25)
+        label.setFont(QFont("Consolas", 9))
+        label.setPos(535, 22)
 
-        self.bar_iq_pid = s.addRect(QRectF(550, 50, 0, 12), QPen(Qt.NoPen), QBrush(self.col_pid))
-        self.bar_iq_mpc = s.addRect(QRectF(550, 70, 0, 12), QPen(Qt.NoPen), QBrush(self.col_mpc))
+        self.bar_iq_pid = s.addRect(QRectF(535, 48, 0, 10), QPen(Qt.NoPen), QBrush(self.col_pid))
+        self.bar_iq_mpc = s.addRect(QRectF(535, 64, 0, 10), QPen(Qt.NoPen), QBrush(self.col_mpc))
         self.txt_iq = s.addText("")
         self.txt_iq.setDefaultTextColor(self.col_fg)
-        self.txt_iq.setFont(QFont("Consolas", 9))
-        self.txt_iq.setPos(550, 88)
+        self.txt_iq.setFont(QFont("Consolas", 8))
+        self.txt_iq.setPos(535, 80)
 
         self._redraw()
 
@@ -156,8 +157,8 @@ class Schematic2DView(QGraphicsView):
     def _needle(self, item, rpm: float):
         rpm = max(0.0, min(2000.0, float(rpm)))
         ang = (-120.0 + (rpm/2000.0)*240.0) * math.pi/180.0
-        cx, cy = 410.0, 120.0
-        r = 90.0
+        cx, cy = 410.0, 240.0
+        r = 120.0
         x2 = cx + r*math.cos(ang)
         y2 = cy + r*math.sin(ang)
         item.setLine(cx, cy, x2, y2)
@@ -176,35 +177,39 @@ class Schematic2DView(QGraphicsView):
         w_t_pid = 2.0 + 10.0 * norm(st.te_pid, te_scale)
         w_t_mpc = 2.0 + 10.0 * norm(st.te_mpc, te_scale)
 
-        # current arrows (offset a bit so PID/MPC both visible)
-        self.arrow_i_pid.setPolygon(self._arrow_poly(210, 150, 320, 150, width=w_i_pid))
-        self.arrow_i_mpc.setPolygon(self._arrow_poly(210, 170, 320, 170, width=w_i_mpc))
-        # torque arrows
-        self.arrow_t_pid.setPolygon(self._arrow_poly(500, 175, 705, 175, width=w_t_pid))
-        self.arrow_t_mpc.setPolygon(self._arrow_poly(500, 195, 705, 195, width=w_t_mpc))
+        # current arrows (aligned with inverter/motor height)
+        self.arrow_i_pid.setPolygon(self._arrow_poly(210, 250, 320, 250, width=w_i_pid))
+        self.arrow_i_mpc.setPolygon(self._arrow_poly(210, 270, 320, 270, width=w_i_mpc))
+        # torque arrows (aligned with shaft)
+        self.arrow_t_pid.setPolygon(self._arrow_poly(500, 250, 705, 250, width=w_t_pid))
+        self.arrow_t_mpc.setPolygon(self._arrow_poly(500, 270, 705, 270, width=w_t_mpc))
 
         # needles
         self._needle(self.needle_ref, st.rpm_ref)
         self._needle(self.needle_pid, st.rpm_pid)
         self._needle(self.needle_mpc, st.rpm_mpc)
 
-        # bars: map |iq_ref| into width (0..350)
-        W = 350.0
+        # bars: map |iq_ref| into width (0..390)
+        W = 390.0
         wpid = W * norm(st.iq_ref_pid, iq_scale)
         wmpc = W * norm(st.iq_ref_mpc, iq_scale)
-        self.bar_iq_pid.setRect(QRectF(550, 50, wpid, 12))
-        self.bar_iq_mpc.setRect(QRectF(550, 70, wmpc, 12))
+        self.bar_iq_pid.setRect(QRectF(535, 48, wpid, 10))
+        self.bar_iq_mpc.setRect(QRectF(535, 64, wmpc, 10))
 
-        # text block
+        # text block (formatted to fit better with proper spacing)
         self.txt.setPlainText(
             f"Mode: {st.mode}\n"
             f"rpm_ref: {st.rpm_ref:7.1f}\n"
-            f"PID rpm: {st.rpm_pid:7.1f}   MPC rpm: {st.rpm_mpc:7.1f}\n"
-            f"TL: {st.tl:6.2f} N·m   |iq|lim: {st.iq_limit:5.1f} A"
+            f"PID rpm: {st.rpm_pid:7.1f}\n"
+            f"MPC rpm: {st.rpm_mpc:7.1f}\n"
+            f"TL: {st.tl:6.2f} N·m\n"
+            f"|iq|lim: {st.iq_limit:5.1f} A"
         )
         self.txt_iq.setPlainText(
-            f"PID iq*: {st.iq_ref_pid:6.2f} A   MPC iq*: {st.iq_ref_mpc:6.2f} A\n"
-            f"PID Te:  {st.te_pid:6.2f} N·m   MPC Te:  {st.te_mpc:6.2f} N·m"
+            f"PID iq*: {st.iq_ref_pid:6.2f} A\n"
+            f"MPC iq*: {st.iq_ref_mpc:6.2f} A\n"
+            f"PID Te:  {st.te_pid:6.2f} N·m\n"
+            f"MPC Te:  {st.te_mpc:6.2f} N·m"
         )
 
         # hide/show based on mode
