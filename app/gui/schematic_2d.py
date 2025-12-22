@@ -214,8 +214,11 @@ class Schematic2DView(QGraphicsView):
 
         # hide/show based on mode
         if st.mode == "PID":
+            # ensure PID elements are visible when switching from MPC/BOTH
+            self.arrow_i_pid.show(); self.arrow_t_pid.show(); self.needle_pid.show(); self.bar_iq_pid.show()
             self.arrow_i_mpc.hide(); self.arrow_t_mpc.hide(); self.needle_mpc.hide(); self.bar_iq_mpc.hide()
         elif st.mode == "MPC":
+            self.arrow_i_mpc.show(); self.arrow_t_mpc.show(); self.needle_mpc.show(); self.bar_iq_mpc.show()
             self.arrow_i_pid.hide(); self.arrow_t_pid.hide(); self.needle_pid.hide(); self.bar_iq_pid.hide()
         else:
             self.arrow_i_pid.show(); self.arrow_t_pid.show(); self.needle_pid.show(); self.bar_iq_pid.show()

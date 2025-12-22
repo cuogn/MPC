@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import List, Tuple, Optional
 import time
 import numpy as np
 import pandas as pd
@@ -33,6 +34,8 @@ class SimConfig:
     mpc_R: float
     mpc_Rd: float
     t_end: float = 3.0
+    omega_profile: Optional[List[Tuple[float, float]]] = None  # [(t, rpm), ...]
+    tl_profile: Optional[List[Tuple[float, float]]] = None     # [(t, Nm), ...]
 
 
 class RealtimeWorker(QThread):
@@ -92,16 +95,38 @@ class RealtimeWorker(QThread):
         k_slip_1 = (p1.Rr / p1.Lr) * (p1.Lm)
         k_slip_2 = (p2.Rr / p2.Lr) * (p2.Lm)
 
-        def omega_ref_rpm(t: float) -> float:
-            return 0.0 if t < self.cfg.t_omega_step else self.cfg.omega_step_rpm
+        def piecewise(profile: Optional[List[Tuple[float, float]]], default: float):
+            if not profile:
+                return lambda _: default
+            prof = sorted(profile, key=lambda x: x[0])
+            def f(t: float) -> float:
+                val = default
+                for tt, vv in prof:
+                    if t >= tt:
+                        val = vv
+                    else:
+                        break
+                return val
+            return f
 
-        def load_torque(t: float) -> float:
-            return 0.0 if t < self.cfg.t_tl_step else self.cfg.tl_step
+        omega_ref_rpm = piecewise(self.cfg.omega_profile, 0.0)
+        load_torque = piecewise(self.cfg.tl_profile, 0.0)
+        # keep backward compatibility with single-step fields when no profile provided
+        if not self.cfg.omega_profile:
+            omega_ref_rpm = lambda t: 0.0 if t < self.cfg.t_omega_step else self.cfg.omega_step_rpm
+        if not self.cfg.tl_profile:
+            load_torque = lambda t: 0.0 if t < self.cfg.t_tl_step else self.cfg.tl_step
 
         def id_ref(_: float) -> float:
             return 5.0
 
-        t_end = float(self.cfg.t_end)
+        # extend sim horizon if profile goes further
+        max_profile_t = 0.0
+        for prof in (self.cfg.omega_profile or []):
+            max_profile_t = max(max_profile_t, float(prof[0]))
+        for prof in (self.cfg.tl_profile or []):
+            max_profile_t = max(max_profile_t, float(prof[0]))
+        t_end = max(float(self.cfg.t_end), max_profile_t + 0.5)
         steps = int(t_end / Ts)
 
         plot_period = 1.0 / max(1e-6, self.plot_hz)

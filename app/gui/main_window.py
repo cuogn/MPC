@@ -23,6 +23,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("IM Speed Control Demo — PID vs MPC (2D Dashboard)")
 
         self.worker: RealtimeWorker | None = None
+        self._thread_active: bool = False  # guard to avoid overlapping runs
+        self.profile_ref: list[tuple[float, float]] | None = None
+        self.profile_tl: list[tuple[float, float]] | None = None
+        self.profile_path: str | None = None
         self.last_pid: pd.DataFrame | None = None
         self.last_mpc: pd.DataFrame | None = None
         self.last_metrics: pd.DataFrame | None = None
@@ -49,12 +53,18 @@ class MainWindow(QMainWindow):
         self.sp_tl_step = QDoubleSpinBox(); self.sp_tl_step.setRange(0, 50); self.sp_tl_step.setValue(5.0); self.sp_tl_step.setSuffix(" N·m")
         self.sp_t_tl = QDoubleSpinBox(); self.sp_t_tl.setRange(0, 10); self.sp_t_tl.setValue(1.50); self.sp_t_tl.setSingleStep(0.05); self.sp_t_tl.setSuffix(" s")
         self.sp_iq_lim = QDoubleSpinBox(); self.sp_iq_lim.setRange(1, 200); self.sp_iq_lim.setValue(20.0); self.sp_iq_lim.setSuffix(" A")
+        self.btn_load_profile = QPushButton("Load profile CSV")
+        self.btn_clear_profile = QPushButton("Clear profile")
+        self.lbl_profile = QLabel("Profile: none")
+        self.lbl_profile.setWordWrap(True)
 
         scen_layout.addRow("ω* step", self.sp_omega_step)
         scen_layout.addRow("t(ω* step)", self.sp_t_omega)
         scen_layout.addRow("T_L step", self.sp_tl_step)
         scen_layout.addRow("t(T_L step)", self.sp_t_tl)
         scen_layout.addRow("|i_q| limit", self.sp_iq_lim)
+        scen_layout.addRow(self.btn_load_profile, self.btn_clear_profile)
+        scen_layout.addRow(self.lbl_profile)
 
         pid_box = QGroupBox("PID Speed (outer)")
         pid_layout = QFormLayout(pid_box)
@@ -150,9 +160,24 @@ class MainWindow(QMainWindow):
         self.btn_export.clicked.connect(self.on_export_bundle)
         self.btn_save_preset.clicked.connect(self.on_save_preset)
         self.btn_load_preset.clicked.connect(self.on_load_preset)
+        self.btn_load_profile.clicked.connect(self.on_load_profile)
+        self.btn_clear_profile.clicked.connect(self.on_clear_profile)
+
+    def _worker_active(self) -> bool:
+        """True while the realtime thread is running or we are awaiting its stop."""
+        return bool(self._thread_active or (self.worker and self.worker.isRunning()))
+
+    def _profile_end(self) -> float:
+        """Latest time from loaded profiles (if any)."""
+        tmax = 0.0
+        for seq in (self.profile_ref or []):
+            tmax = max(tmax, float(seq[0]))
+        for seq in (self.profile_tl or []):
+            tmax = max(tmax, float(seq[0]))
+        return tmax
 
     def _update_enable(self):
-        running = self.worker is not None and self.worker.is_running
+        running = self._worker_active()
         for b in (self.btn_run_pid, self.btn_run_mpc, self.btn_run_both, self.btn_save_preset, self.btn_load_preset, self.btn_reset, self.btn_export):
             b.setEnabled(not running)
         self.btn_stop.setEnabled(running)
@@ -171,19 +196,32 @@ class MainWindow(QMainWindow):
             mpc_R=float(self.sp_R.value()),
             mpc_Rd=float(self.sp_Rd.value()),
             t_end=3.0,
+            omega_profile=self.profile_ref,
+            tl_profile=self.profile_tl,
         )
 
     def _run(self, mode: str):
-        if self.worker is not None and self.worker.is_running:
+        if self._worker_active():
             return
         cfg = self._gather_config()
+        # show full horizon if a long profile is loaded
+        window_s = max(3.0, self._profile_end() + 1.0)
         # a touch smoother plot refresh
-        self.worker = RealtimeWorker(cfg, mode=mode, plot_hz=60.0, window_s=3.0)
+        self.worker = RealtimeWorker(cfg, mode=mode, plot_hz=60.0, window_s=window_s)
         self.worker.sig_status.connect(self.on_status)
         self.worker.sig_data.connect(self.on_data)
         self.worker.sig_done.connect(self.on_done)
+        self.worker.finished.connect(self._on_worker_finished)
+        # guard immediately to avoid double start before thread marks is_running
+        self._thread_active = True
         self.worker.start()
         self.on_status(f"running {mode} ...")
+        self._update_enable()
+
+    @Slot()
+    def _on_worker_finished(self):
+        self._thread_active = False
+        self.worker = None
         self._update_enable()
 
     @Slot()
@@ -191,15 +229,20 @@ class MainWindow(QMainWindow):
         if self.worker:
             self.worker.stop()
         self.on_status("stopping...")
+        self._update_enable()
 
     @Slot()
     def on_reset(self):
         if self.worker:
             self.worker.stop()
-            self.worker = None
+            # keep the thread reference until it exits to avoid leaks/double runs
         self.last_pid = None
         self.last_mpc = None
         self.last_metrics = None
+        self.profile_ref = None
+        self.profile_tl = None
+        self.profile_path = None
+        self.lbl_profile.setText("Profile: none")
         for c in (self.curve_omega_pid, self.curve_omega_mpc, self.curve_omega_ref, self.curve_iq_pid, self.curve_iq_mpc):
             c.setData([], [])
         self.metrics_panel.clear()
@@ -260,6 +303,8 @@ class MainWindow(QMainWindow):
         self.last_mpc = payload.get("mpc")
         self.last_metrics = payload.get("metrics")
         self.metrics_panel.set_metrics(self.last_metrics)
+        self._thread_active = False
+        self.worker = None
         self._update_enable()
 
     @Slot()
@@ -294,6 +339,13 @@ class MainWindow(QMainWindow):
             self.sp_Q.setValue(float(cfg.get("mpc_Q", 1.0)))
             self.sp_R.setValue(float(cfg.get("mpc_R", 0.02)))
             self.sp_Rd.setValue(float(cfg.get("mpc_Rd", 0.2)))
+            # optional profiles
+            self.profile_ref = cfg.get("omega_profile")
+            self.profile_tl = cfg.get("tl_profile")
+            if self.profile_ref or self.profile_tl:
+                n_ref = len(self.profile_ref or [])
+                n_tl = len(self.profile_tl or [])
+                self.lbl_profile.setText(f"Profile from preset ({n_ref} ω*, {n_tl} T_L points)")
             QMessageBox.information(self, "Preset", f"Loaded:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "Preset", str(e))
@@ -331,3 +383,37 @@ class MainWindow(QMainWindow):
             pass
 
         QMessageBox.information(self, "Export", f"Exported bundle to:\n{out_dir}")
+
+    @Slot()
+    def on_load_profile(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load profile CSV", "", "CSV Files (*.csv)")
+        if not path:
+            return
+        try:
+            df = pd.read_csv(path)
+            if "t" not in df.columns:
+                raise ValueError("CSV must have column 't' (seconds)")
+            if "omega_ref_rpm" not in df.columns and "omega_ref" not in df.columns:
+                raise ValueError("CSV needs 'omega_ref_rpm' column")
+            if "T_L" not in df.columns and "tl" not in df.columns:
+                raise ValueError("CSV needs 'T_L' column")
+            self.profile_ref = [(float(t), float(w)) for t, w in zip(df["t"], df.get("omega_ref_rpm", df.get("omega_ref")))]
+            self.profile_tl = [(float(t), float(tl)) for t, tl in zip(df["t"], df.get("T_L", df.get("tl")))]
+            if "iq_limit" in df.columns:
+                try:
+                    iq_first = float(df["iq_limit"].iloc[0])
+                    self.sp_iq_lim.setValue(iq_first)
+                except Exception:
+                    pass
+            self.profile_path = path
+            self.lbl_profile.setText(f"Profile: {os.path.basename(path)} ({len(self.profile_ref)} pts)")
+            QMessageBox.information(self, "Profile", f"Loaded timeline from:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Profile", str(e))
+
+    @Slot()
+    def on_clear_profile(self):
+        self.profile_ref = None
+        self.profile_tl = None
+        self.profile_path = None
+        self.lbl_profile.setText("Profile: none")
