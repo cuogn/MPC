@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
         self.sp_Q = QDoubleSpinBox(); self.sp_Q.setRange(0, 1000); self.sp_Q.setDecimals(3); self.sp_Q.setValue(1.0)
         self.sp_R = QDoubleSpinBox(); self.sp_R.setRange(0, 1000); self.sp_R.setDecimals(5); self.sp_R.setValue(0.02)
         self.sp_Rd = QDoubleSpinBox(); self.sp_Rd.setRange(0, 1000); self.sp_Rd.setDecimals(3); self.sp_Rd.setValue(0.2)
-        mpc_layout.addRow("Np", self.sp_np)
+        mpc_layout.addRow("Np (cửa sổ dự báo)", self.sp_np)
         mpc_layout.addRow("Q", self.sp_Q)
         mpc_layout.addRow("R", self.sp_R)
         mpc_layout.addRow("Rd(Δu)", self.sp_Rd)
@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
         if self._worker_active():
             return
         cfg = self._gather_config()
-        # show full horizon if a long profile is loaded
+        # show full display window if a long profile is loaded
         window_s = max(3.0, self._profile_end() + 1.0)
         # a touch smoother plot refresh
         self.worker = RealtimeWorker(cfg, mode=mode, plot_hz=60.0, window_s=window_s)

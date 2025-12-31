@@ -40,7 +40,7 @@ class Schematic2DView(QGraphicsView):
         super().__init__(parent)
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setRenderHint(QPainter.TextAntialiasing, True)
-        self.setBackgroundBrush(QBrush(Qt.black))
+        self.setBackgroundBrush(QBrush(Qt.white))
 
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
@@ -58,9 +58,9 @@ class Schematic2DView(QGraphicsView):
         s.clear()
 
         # palette
-        self.col_fg = Qt.white
-        self.col_panel = Qt.darkGray
-        self.col_wire = Qt.gray
+        self.col_fg = Qt.black
+        self.col_panel = Qt.lightGray
+        self.col_wire = Qt.darkGray
         self.col_pid = Qt.cyan      # close to "blue" but visible on dark
         self.col_mpc = Qt.yellow    # visible on dark
         self.col_ref = Qt.green
@@ -75,8 +75,8 @@ class Schematic2DView(QGraphicsView):
         t.setPos(75, 232)
 
         # motor: stator + rotor (centered lower to avoid text overlap)
-        s.addEllipse(QRectF(330, 170, 160, 160), QPen(self.col_fg, 2), QBrush(Qt.black))
-        s.addEllipse(QRectF(365, 205, 90, 90), QPen(self.col_wire, 2), QBrush(Qt.black))
+        s.addEllipse(QRectF(330, 170, 160, 160), QPen(self.col_fg, 2), QBrush(Qt.white))
+        s.addEllipse(QRectF(365, 205, 90, 90), QPen(self.col_wire, 2), QBrush(Qt.white))
         mt = s.addText("IM\nMotor")
         mt.setDefaultTextColor(self.col_fg)
         mt.setPos(395, 235)
@@ -113,14 +113,14 @@ class Schematic2DView(QGraphicsView):
         gl.setPos(372, 330)
 
         # bars panel (Mode info - left top)
-        s.addRect(QRectF(25, 15, 290, 110), QPen(self.col_wire, 1), QBrush(Qt.black))
+        s.addRect(QRectF(25, 15, 290, 110), QPen(self.col_wire, 1), QBrush(Qt.white))
         self.txt = s.addText("")
         self.txt.setDefaultTextColor(self.col_fg)
         self.txt.setFont(QFont("Consolas", 9))
         self.txt.setPos(38, 24)
 
         # Commands panel (right top) - same height as Mode panel
-        s.addRect(QRectF(525, 15, 430, 130), QPen(self.col_wire, 1), QBrush(Qt.black))
+        s.addRect(QRectF(525, 15, 430, 130), QPen(self.col_wire, 1), QBrush(Qt.white))
         label = s.addText("Commands")
         label.setDefaultTextColor(self.col_fg)
         label.setFont(QFont("Consolas", 9))

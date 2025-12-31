@@ -1,0 +1,107 @@
+{
+  "nominal": {
+    "motor": {
+      "Rs": 0.435,
+      "Rr": 0.816,
+      "Ls": 0.0713,
+      "Lr": 0.0713,
+      "Lm": 0.0693,
+      "p": 2,
+      "J": 0.02,
+      "B": 0.001
+    },
+    "loop": {
+      "dt_plant": 0.0001,
+      "Ts_speed": 0.001,
+      "t_end": 3.0
+    },
+    "limits": {
+      "iq_limit": 20.0,
+      "Vmax": 300.0
+    },
+    "current_pi": {
+      "id_ref": 5.0,
+      "kp": 20.0,
+      "ki": 2000.0,
+      "kaw": 0.002
+    },
+    "pid": {
+      "kp": 0.8,
+      "ki": 10.0,
+      "kd": 0.0,
+      "kaw": 0.2
+    },
+    "mpc": {
+      "Np": 25,
+      "Q": 1.0,
+      "R": 0.02,
+      "Rd": 0.2
+    },
+    "scenario": {
+      "omega_step_rpm": 1500.0,
+      "t_omega_step": 0.3
+    }
+  },
+  "scenarios": [
+    {
+      "id": "S0_NOMINAL",
+      "desc": "Nominal params, load step 5 N·m",
+      "mult": {},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S1_Rs_PLUS20",
+      "desc": "Rs +20%",
+      "mult": {"Rs": 1.2},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S2_Rs_MINUS20",
+      "desc": "Rs -20%",
+      "mult": {"Rs": 0.8},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S3_Rr_PLUS20",
+      "desc": "Rr +20%",
+      "mult": {"Rr": 1.2},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S4_Rr_MINUS20",
+      "desc": "Rr -20%",
+      "mult": {"Rr": 0.8},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S5_Lsigma_PLUS20",
+      "desc": "Leakage inductance (Lσ) +20%",
+      "mult": {"Lsigma": 1.2},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S6_Lsigma_MINUS20",
+      "desc": "Leakage inductance (Lσ) -20%",
+      "mult": {"Lsigma": 0.8},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S7_Lm_PLUS10",
+      "desc": "Mutual inductance (Lm) +10%",
+      "mult": {"Lm": 1.1},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S8_Lm_MINUS10",
+      "desc": "Mutual inductance (Lm) -10%",
+      "mult": {"Lm": 0.9},
+      "load": {"type": "STEP", "t0": 1.5, "value": 5.0}
+    },
+    {
+      "id": "S9_HEAVY_LOAD",
+      "desc": "Heavy load step to force current saturation",
+      "mult": {},
+      "load": {"type": "STEP", "t0": 1.5, "value": 20.0}
+    }
+  ]
+}

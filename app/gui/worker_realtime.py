@@ -120,7 +120,7 @@ class RealtimeWorker(QThread):
         def id_ref(_: float) -> float:
             return 5.0
 
-        # extend sim horizon if profile goes further
+        # extend simulation window if profile goes further
         max_profile_t = 0.0
         for prof in (self.cfg.omega_profile or []):
             max_profile_t = max(max_profile_t, float(prof[0]))

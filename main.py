@@ -6,7 +6,14 @@ def main():
         "--demo",
         type=str,
         default=None,
-        choices=["open_loop", "current_loop", "speed_pid", "speed_mpc", "compare_pid_mpc"],
+        choices=[
+            "open_loop",
+            "current_loop",
+            "speed_pid",
+            "speed_mpc",
+            "compare_pid_mpc",
+            "batch_scenarios",
+        ],
     )
     parser.add_argument("--gui", action="store_true", help="Launch realtime GUI")
     args = parser.parse_args()
@@ -27,6 +34,12 @@ def main():
         run_speed_mpc_demo,
         run_compare_pid_mpc_demo,
     )
+
+    if args.demo == "batch_scenarios":
+        from app.sim.batch_scenarios import run_batch
+        out_dir = run_batch("scenarios/scenarios_catalog.json", out_dir=None)
+        print(f"Saved batch results to: {out_dir}")
+        return
 
     if args.demo == "open_loop":
         run_open_loop_demo()

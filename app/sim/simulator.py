@@ -3,6 +3,10 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from app.plotting.plot_style import apply_thesis_style, save_figure
+
+apply_thesis_style()
+
 from app.sim.motor_im_dq import IMParams, InductionMotorDQ
 from app.sim.integrators import rk4_step
 from app.sim.logger import SimLogger
@@ -10,7 +14,7 @@ from app.sim.scenarios import OpenLoopScenario
 from app.sim.foc_current_loop import CurrentLoopPI, PIParams
 from app.control.pid_speed import PIDSpeed, PIDParams
 from app.control.mpc_speed import SpeedMPC, MPCParams
-from app.metrics.metrics import rmse, ise, itae, overshoot_percent
+from app.metrics.metrics import rmse, ise, itae, overshoot_percent, settling_time
 
 
 def default_motor_params() -> IMParams:
@@ -78,7 +82,7 @@ def run_open_loop_demo():
     ax.grid(True); ax.legend()
     ax.set_xlabel("Time (s)"); ax.set_ylabel("Speed (rpm)")
     fig.tight_layout()
-    fig.savefig("outputs/open_loop.png", dpi=160)
+    save_figure(fig, "outputs/open_loop", dpi=300)
     plt.close(fig)
 
     last = df.iloc[-1]
@@ -162,7 +166,7 @@ def run_current_loop_demo():
     ax2.grid(True); ax2.legend()
 
     fig.tight_layout()
-    fig.savefig("outputs/current_loop.png", dpi=160)
+    save_figure(fig, "outputs/current_loop", dpi=300)
     plt.close(fig)
 
     last = df.iloc[-1]
@@ -249,7 +253,7 @@ def _speed_control_sim(controller: str):
             B = (Kt / p.J) * Ts
             G = -(1.0 / p.J) * Ts
 
-            # horizon references / disturbance (hold constant)
+            # cửa sổ dự báo: tham chiếu / nhiễu (giữ hằng)
             wref_seq = np.full(mpc.p.Np, omega_ref, dtype=float)
             d_seq = np.full(mpc.p.Np, load_torque(t0), dtype=float)
             sol = mpc.step(w0=omega_m, wref_seq=wref_seq, A=A, B=B, G=G, d_seq=d_seq)
@@ -321,11 +325,18 @@ def _speed_control_sim(controller: str):
     yref = df.loc[mask, "omega_ref_rpm"].values
     t = df.loc[mask, "t"].values
 
+    # Saturation percentage: how often the outer-loop command hits the i_q* limit.
+    iq_lim = 20.0
+    sat_pct = float(100.0 * np.mean(np.abs(df.loc[mask, "iq_ref"].values) >= (iq_lim - 1e-9)))
+
     met = {
         "rmse_rpm": rmse(y, yref),
         "ise": ise(y, yref),
         "itae": itae(t - t[0], y, yref),
         "overshoot_%": overshoot_percent(y, float(yref[-1] if len(yref) else 0.0)),
+        # Settling time with 2% band (advisor checklist)
+        "settling_s": settling_time(t, y, float(yref[-1] if len(yref) else 0.0), tol_pct=2.0),
+        "sat_pct": sat_pct,
         "final_speed_rpm": float(df["omega_rpm"].values[-1]),
     }
     return df, met
@@ -359,7 +370,7 @@ def run_speed_pid_demo():
     ax3.grid(True); ax3.legend()
 
     fig.tight_layout()
-    fig.savefig("outputs/speed_pid.png", dpi=160)
+    save_figure(fig, "outputs/speed_pid", dpi=300)
     plt.close(fig)
 
     print("=== Speed PID demo finished ===")
@@ -395,7 +406,7 @@ def run_speed_mpc_demo():
     ax3.grid(True); ax3.legend()
 
     fig.tight_layout()
-    fig.savefig("outputs/speed_mpc.png", dpi=160)
+    save_figure(fig, "outputs/speed_mpc", dpi=300)
     plt.close(fig)
 
     print("=== Speed MPC demo finished ===")
@@ -432,7 +443,7 @@ def run_compare_pid_mpc_demo():
     ax2.grid(True); ax2.legend()
 
     fig.tight_layout()
-    fig.savefig("outputs/compare_pid_mpc.png", dpi=160)
+    save_figure(fig, "outputs/compare_pid_mpc", dpi=300)
     plt.close(fig)
 
     print("=== Compare PID vs MPC finished ===")
