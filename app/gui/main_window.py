@@ -129,24 +129,41 @@ class MainWindow(QMainWindow):
         self.schematic = Schematic2DView()
         right.addWidget(self.schematic, 0)
 
-        self.plot_speed = pg.PlotWidget(title="Speed")
-        self.plot_speed.setLabel("left", "rpm")
-        self.plot_speed.setLabel("bottom", "time", units="s")
-        self.plot_speed.showGrid(x=True, y=True)
+        # ---- Plot styling (white background already set in app.gui.app) ----
+        # Explicit pens so curves are clearly visible on white background.
+        pen_pid = pg.mkPen(color=(31, 119, 180), width=2.5)   # blue
+        pen_mpc = pg.mkPen(color=(214, 39, 40), width=2.5)    # red
+        pen_ref = pg.mkPen(color=(0, 0, 0), width=2.0, style=Qt.DashLine)  # black dashed
+        pen_lim = pg.mkPen(color=(60, 60, 60), width=1.3, style=Qt.DotLine)
+
+        self.plot_speed = pg.PlotWidget()
+        self.plot_speed.setTitle("Speed", size="14pt")
+        self.plot_speed.setLabel("left", "rpm", **{"font-size": "12pt"})
+        self.plot_speed.setLabel("bottom", "time", units="s", **{"font-size": "12pt"})
+        self.plot_speed.showGrid(x=True, y=True, alpha=0.15)
         self.plot_speed.setDownsampling(auto=True, mode="peak")
         self.plot_speed.setClipToView(True)
-        self.curve_omega_pid = self.plot_speed.plot([], [], name="PID ω")
-        self.curve_omega_mpc = self.plot_speed.plot([], [], name="MPC ω")
-        self.curve_omega_ref = self.plot_speed.plot([], [], pen=pg.mkPen(style=Qt.DashLine), name="ω*")
+        self.plot_speed.addLegend(offset=(10, 10))
 
-        self.plot_iq = pg.PlotWidget(title="i_q* command")
-        self.plot_iq.setLabel("left", "A")
-        self.plot_iq.setLabel("bottom", "time", units="s")
-        self.plot_iq.showGrid(x=True, y=True)
+        self.curve_omega_pid = self.plot_speed.plot([], [], pen=pen_pid, name="PID ω")
+        self.curve_omega_mpc = self.plot_speed.plot([], [], pen=pen_mpc, name="MPC ω")
+        self.curve_omega_ref = self.plot_speed.plot([], [], pen=pen_ref, name="ω*")
+
+        self.plot_iq = pg.PlotWidget()
+        self.plot_iq.setTitle("i_q* command", size="14pt")
+        self.plot_iq.setLabel("left", "A", **{"font-size": "12pt"})
+        self.plot_iq.setLabel("bottom", "time", units="s", **{"font-size": "12pt"})
+        self.plot_iq.showGrid(x=True, y=True, alpha=0.15)
         self.plot_iq.setDownsampling(auto=True, mode="peak")
         self.plot_iq.setClipToView(True)
-        self.curve_iq_pid = self.plot_iq.plot([], [], name="PID i_q*")
-        self.curve_iq_mpc = self.plot_iq.plot([], [], name="MPC i_q*")
+        self.plot_iq.addLegend(offset=(10, 10))
+
+        self.curve_iq_pid = self.plot_iq.plot([], [], pen=pen_pid, name="PID i_q*")
+        self.curve_iq_mpc = self.plot_iq.plot([], [], pen=pen_mpc, name="MPC i_q*")
+
+        # Optional limit guides (updated in on_data)
+        self.curve_iq_lim_p = self.plot_iq.plot([], [], pen=pen_lim, name="+|i_q| limit")
+        self.curve_iq_lim_n = self.plot_iq.plot([], [], pen=pen_lim, name="-|i_q| limit")
 
         right.addWidget(self.plot_speed, 1)
         right.addWidget(self.plot_iq, 1)
@@ -243,7 +260,7 @@ class MainWindow(QMainWindow):
         self.profile_tl = None
         self.profile_path = None
         self.lbl_profile.setText("Profile: none")
-        for c in (self.curve_omega_pid, self.curve_omega_mpc, self.curve_omega_ref, self.curve_iq_pid, self.curve_iq_mpc):
+        for c in (self.curve_omega_pid, self.curve_omega_mpc, self.curve_omega_ref, self.curve_iq_pid, self.curve_iq_mpc, self.curve_iq_lim_p, self.curve_iq_lim_n):
             c.setData([], [])
         self.metrics_panel.clear()
         self.on_status("ready")
@@ -273,6 +290,17 @@ class MainWindow(QMainWindow):
         else:
             self.curve_omega_mpc.setData([], [])
             self.curve_iq_mpc.setData([], [])
+
+        # iq limit guide lines (helpful in heavy-load / saturation scenario)
+        iq_lim = float(payload.get("iq_limit", float(self.sp_iq_lim.value())))
+        # determine current visible time span
+        t_candidates = []
+        for key in ("t_ref", "t_pid", "t_mpc"):
+            if payload.get(key) is not None and len(payload.get(key, [])) > 0:
+                t_candidates.append(float(payload[key][-1]))
+        tmax = max(t_candidates) if t_candidates else 3.0
+        self.curve_iq_lim_p.setData([0.0, tmax], [iq_lim, iq_lim])
+        self.curve_iq_lim_n.setData([0.0, tmax], [-iq_lim, -iq_lim])
 
         # schematic: derive last PID/MPC values from arrays if present
         def last(arr, default=0.0):
