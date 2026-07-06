@@ -7,14 +7,14 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QScrollArea, QTableWidget, QTableWidgetItem,
     QHeaderView, QSlider, QButtonGroup, QCheckBox, QSizePolicy, QApplication
 )
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtGui import QIcon, QFont, QKeySequence, QShortcut, QWheelEvent
 import pyqtgraph as pg
 import pandas as pd
 import numpy as np
 import json
 from datetime import datetime
 import os
-
+import time
 from app.gui.worker_realtime import RealtimeWorker, SimConfig
 
 class MainWindow(QMainWindow):
@@ -35,7 +35,33 @@ class MainWindow(QMainWindow):
         pg.setConfigOption('background', '#0D162D') 
         pg.setConfigOption('foreground', '#E2E8F0')
         pg.setConfigOptions(antialias=True)
+        # Lấy chiều cao màn hình hiện tại
+        screen = QApplication.primaryScreen().availableGeometry()
+        screen_height = screen.height()
 
+        # Tính tỷ lệ tự động (Giả sử UI thiết kế chuẩn ở màn hình cao 1080px)
+        auto_scale = int((screen_height / 1080.0) * 100)
+        
+        # Giới hạn zoom tự động trong khoảng 70% đến 150%
+        self.font_pct = max(70, min(150, auto_scale))
+
+        pg.setConfigOption('background', '#0D162D') 
+        pg.setConfigOption('foreground', '#E2E8F0')
+        pg.setConfigOptions(antialias=True)
+
+        self._build_ui()
+        self._apply_qss() 
+        self._connect()
+        self._update_enable()
+        
+        # Mở app chiếm toàn bộ không gian làm việc (thay vì self.resize fix cứng)
+        self.showMaximized() 
+        
+        # Cập nhật nhãn hiển thị % font ở footer
+        self.lbl_font_val.setText(f"{self.font_pct}%")
+        
+        # Setup phím tắt (nếu cần)
+        self._setup_shortcuts()
         self._build_ui()
         self._apply_qss() 
         self._connect()
@@ -43,12 +69,33 @@ class MainWindow(QMainWindow):
         self.resize(1600, 900) 
 
     def _apply_qss(self):
-        sz_base = max(9, int(12 * self.font_pct / 100))
-        sz_small = max(8, int(10 * self.font_pct / 100))
-        sz_h1 = max(14, int(18 * self.font_pct / 100))
-        sz_h2 = max(12, int(16 * self.font_pct / 100))
-        sz_kpi = max(14, int(18 * self.font_pct / 100))
-        sz_icon = max(18, int(22 * self.font_pct / 100))
+        s = self.font_pct / 100.0
+        
+        # --- 1. SCALE TEXT ---
+        sz_base = max(6, int(12 * s))
+        sz_small = max(5, int(10 * s))
+        sz_h1 = max(8, int(18 * s))
+        sz_h2 = max(8, int(16 * s))
+        sz_kpi = max(8, int(18 * s))
+        sz_icon = max(10, int(22 * s))
+        
+        # --- 2. SCALE COMPONENTS (Padding, Margin, Width, Height) ---
+        pad = int(4 * s)
+        pad_btn = int(6 * s)
+        rad = int(4 * s)
+        rad_lg = int(6 * s)
+        
+        grp_mt = int(12 * s)  # margin-top cho GroupBox
+        grp_pt = int(18 * s)  # padding-top cho GroupBox
+        
+        spin_h = int(28 * s)  # Chiều cao QSpinBox
+        spin_pr = int(24 * s) # Padding phải chừa chỗ cho nút mũi tên
+        spin_btn_w = int(20 * s)
+        spin_btn_h = int(14 * s)
+        spin_arr = int(12 * s)
+        
+        chk_sz = int(18 * s)  # Kích thước ô vuông QCheckBox
+        chk_space = int(8 * s)
         
         # Tìm đường dẫn tuyệt đối đến file SVG
         import os
@@ -99,10 +146,10 @@ class MainWindow(QMainWindow):
         up_icon = f"url({up_icon_path})"
         down_icon = f"url({down_icon_path})"
 
+        # --- 3. APPLY VÀO QSS ---
         dark_qss = f"""
         QMainWindow, QWidget {{
-            background-color: #060B19;
-            color: #E2E8F0;
+            background-color: #060B19; color: #E2E8F0;
             font-family: 'Inter', 'Segoe UI', sans-serif;
             font-size: {sz_base}px;
         }}
@@ -110,28 +157,22 @@ class MainWindow(QMainWindow):
         QLabel, QCheckBox, QSlider {{ background-color: transparent; }}
         
         QGroupBox {{
-            background-color: #0D162D;
-            border: 1px solid #1E2E5D;
-            border-radius: 6px;
-            margin-top: 12px; 
-            padding-top: 18px; 
-            font-weight: bold;
-            color: #48CAE4;
+            background-color: #0D162D; border: 1px solid #1E2E5D;
+            border-radius: {rad_lg}px;
+            margin-top: {grp_mt}px; 
+            padding-top: {grp_pt}px; 
+            font-weight: bold; color: #48CAE4;
         }}
         QGroupBox::title {{
-            subcontrol-origin: padding;
-            subcontrol-position: top left;
-            left: 10px; 
-            top: 0px; 
-            padding: 2px;
+            subcontrol-origin: padding; subcontrol-position: top left;
+            left: 10px; top: 0px; padding: 2px;
             font-size: {sz_base}px;
         }}
         
         QPushButton {{
-            background-color: #1E2E5D;
-            border: 1px solid #2A3F7A;
-            border-radius: 4px;
-            padding: 6px;
+            background-color: #1E2E5D; border: 1px solid #2A3F7A;
+            border-radius: {rad}px;
+            padding: {pad_btn}px;
             color: #E2E8F0;
         }}
         QPushButton:hover {{ background-color: #2A3F7A; }}
@@ -146,81 +187,58 @@ class MainWindow(QMainWindow):
         QPushButton#btnStop:hover {{ background-color: #c0392b; }}
         QPushButton#btnOriginalReset {{ background-color: #556075; color: white; font-weight: bold; }}
         
-        QWidget#ModeBox {{ background-color: #0D162D; border: 1px solid #1E2E5D; border-radius: 12px; padding: 3px; }}
+        QWidget#ModeBox {{ background-color: #0D162D; border: 1px solid #1E2E5D; border-radius: {rad_lg*2}px; padding: {pad}px; }}
         QPushButton#btnModeActive {{ background-color: #16A34A; color: white; font-weight: bold; border-radius: 8px; margin: 0px 2px; }}
         QPushButton#btnMode {{ background-color: transparent; border: 1px solid transparent; border-radius: 8px; margin: 0px 2px; }}
         QPushButton#btnMode:hover {{ background-color: #1E2E5D; }}
 
         QLineEdit {{
-            background-color: #060B19; 
-            border: 1px solid #1E2E5D; 
-            border-radius: 4px; 
-            padding: 4px;
+            background-color: #060B19; border: 1px solid #1E2E5D; 
+            border-radius: {rad}px; padding: {pad}px;
         }}
         
-        /* Style cho SpinBox với nút dọc */
         QSpinBox, QDoubleSpinBox {{
-            background-color: #060B19;
-            border: 1px solid #1E2E5D;
-            border-radius: 4px;
-            padding: 4px;
-            min-height: 28px;
-            padding-right: 24px;
+            background-color: #060B19; border: 1px solid #1E2E5D;
+            border-radius: {rad}px;
+            padding: {pad}px;
+            min-height: {spin_h}px;
+            padding-right: {spin_pr}px;
         }}
         
-        /* Định dạng vùng chứa nút */
         QSpinBox::up-button, QDoubleSpinBox::up-button {{
-            subcontrol-origin: border;
-            subcontrol-position: top right;
-            width: 20px;
-            height: 14px;
-            top: 1px;
-            right: 1px;
-            background-color: #1E2E5D;
-            border: none;
-            border-radius: 2px;
+            subcontrol-origin: border; subcontrol-position: top right;
+            width: {spin_btn_w}px; height: {spin_btn_h}px;
+            top: 1px; right: 1px;
+            background-color: #1E2E5D; border: none; border-radius: 2px;
         }}
         
         QSpinBox::down-button, QDoubleSpinBox::down-button {{
-            subcontrol-origin: border;
-            subcontrol-position: bottom right;
-            width: 20px;
-            height: 14px;
-            bottom: 1px;
-            right: 1px;
-            background-color: #1E2E5D;
-            border: none;
-            border-radius: 2px;
+            subcontrol-origin: border; subcontrol-position: bottom right;
+            width: {spin_btn_w}px; height: {spin_btn_h}px;
+            bottom: 1px; right: 1px;
+            background-color: #1E2E5D; border: none; border-radius: 2px;
         }}
         
-        /* Hiển thị SVG cho mũi tên */
         QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-            image: {up_icon};
-            width: 12px;
-            height: 12px;
+            image: {up_icon}; width: {spin_arr}px; height: {spin_arr}px;
         }}
         
         QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-            image: {down_icon};
-            width: 12px;
-            height: 12px;
+            image: {down_icon}; width: {spin_arr}px; height: {spin_arr}px;
         }}
         
-        /* Hover effects */
         QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
-        QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
-            background-color: #2A3F7A;
-        }}
+        QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background-color: #2A3F7A; }}
         
-        QCheckBox {{ spacing: 8px; }}
-        QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid #1E2E5D; border-radius: 4px; background-color: #060B19; }}
+        QCheckBox {{ spacing: {chk_space}px; }}
+        QCheckBox::indicator {{ width: {chk_sz}px; height: {chk_sz}px; border: 1px solid #1E2E5D; border-radius: {rad}px; background-color: #060B19; }}
         QCheckBox::indicator:checked {{ background-color: #16A34A; border: 1px solid #14532d; }}
         
         QTableWidget {{ background-color: transparent; border: none; gridline-color: #1E2E5D; }}
-        QHeaderView::section {{ background-color: #1E2E5D; color: white; padding: 5px; border: none; font-weight: bold; font-size: {sz_base}px; }}
+        QHeaderView::section {{ background-color: #1E2E5D; color: white; padding: {pad_btn}px; border: none; font-weight: bold; font-size: {sz_base}px; }}
         QScrollArea {{ border: none; }}
         
-        QWidget#BorderBox {{ background-color: #0D162D; border: 1px solid #1E2E5D; border-radius: 6px; }}
+        QWidget#BorderBox {{ background-color: #0D162D; border: 1px solid #1E2E5D; border-radius: {rad_lg}px; }}
         
         QLabel.LblH1 {{ font-size: {sz_h1}px; font-weight: bold; color: #FFFFFF; }}
         QLabel.LblH2 {{ font-size: {sz_h2}px; font-weight: bold; color: #16A34A; }}
@@ -228,22 +246,40 @@ class MainWindow(QMainWindow):
         QLabel.LblIcon {{ font-size: {sz_icon}px; }}
         
         QLabel.KPIName {{ color: #E2E8F0; font-size: {sz_small}px; font-weight: bold; }}
-        QLabel.KPIHeaderPID {{ color: #E65F2B; font-size: {max(8, sz_small-1)}px; font-weight: bold; }}
-        QLabel.KPIHeaderMPC {{ color: #48CAE4; font-size: {max(8, sz_small-1)}px; font-weight: bold; }}
+        QLabel.KPIHeaderPID {{ color: #E65F2B; font-size: {max(5, int((10*s)-1))}px; font-weight: bold; }}
+        QLabel.KPIHeaderMPC {{ color: #48CAE4; font-size: {max(5, int((10*s)-1))}px; font-weight: bold; }}
         QLabel.KPIValPID {{ color: #E65F2B; font-size: {sz_kpi}px; font-weight: bold; }}
         QLabel.KPIValMPC {{ color: #48CAE4; font-size: {sz_kpi}px; font-weight: bold; }}
         QLabel.KPIImp {{ color: #7F8C8D; font-size: {sz_small}px; font-weight: bold; }}
         """
         self.setStyleSheet(dark_qss)
         
-        sz_pt = max(8, int(10 * self.font_pct / 100))
-        self.plot_speed.setTitle("Speed Reference vs Actual Speed", color="#E2E8F0", size=f"{sz_pt}pt")
-        self.plot_err.setTitle("Tracking Error (Speed Error)", color="#E2E8F0", size=f"{sz_pt}pt")
-        self.plot_iq.setTitle("Electromagnetic Torque (Command)", color="#E2E8F0", size=f"{sz_pt}pt")
+        # --- 4. SCALE TABLE HEIGHT VÀ PYQTGRAPH TITLES ---
+        # Kiểm tra hasattr để tránh lỗi khi hàm được gọi lần đầu ở __init__ trước khi UI kịp build
+        if hasattr(self, 'tbl_metrics'):
+            row_h = max(15, int(30 * s)) # Đảm bảo row không bị ép bẹp dí (<15px)
+            self.tbl_metrics.verticalHeader().setDefaultSectionSize(row_h)
+            self.tbl_status.verticalHeader().setDefaultSectionSize(row_h)
+            
+            self.tbl_metrics.setMinimumHeight(int(240 * s))
+            
+            # Hạ giới hạn font size của biểu đồ xuống (ví dụ 5pt)
+            sz_pt = max(5, int(10 * s))
+            self.plot_speed.setTitle("Speed Reference vs Actual Speed", color="#E2E8F0", size=f"{sz_pt}pt")
+            self.plot_err.setTitle("Tracking Error (Speed Error)", color="#E2E8F0", size=f"{sz_pt}pt")
+            self.plot_iq.setTitle("Electromagnetic Torque (Command)", color="#E2E8F0", size=f"{sz_pt}pt")
 
     def _build_ui(self):
+        # --- THÊM QSCROLLAREA LÀM CENTRAL WIDGET ---
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True) # Cho phép nội dung bên trong tự co giãn
+        self.scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #060B19; }")
+        self.setCentralWidget(self.scroll_area)
+
+        # --- TẠO ROOT WIDGET CHỨA NỘI DUNG VÀ NHÉT VÀO SCROLL AREA ---
         root = QWidget()
-        self.setCentralWidget(root)
+        self.scroll_area.setWidget(root)
+        
         main_layout = QVBoxLayout(root)
         main_layout.setContentsMargins(15, 10, 15, 10)
 
@@ -284,7 +320,7 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
 
         self.header_status_box = QWidget(); self.header_status_box.setObjectName("BorderBox")
-        self.header_status_box.setFixedWidth(360) 
+        self.header_status_box.setMinimumWidth(360) 
         h_box_lay = QHBoxLayout(self.header_status_box)
         h_box_lay.setContentsMargins(15, 5, 15, 5)
         
@@ -311,7 +347,7 @@ class MainWindow(QMainWindow):
 
         # ---------------- CỘT TRÁI (Sidebar) - Tăng width và bỏ scroll ----------------
         left_widget = QWidget()
-        left_widget.setFixedWidth(360)
+        left_widget.setMinimumWidth(320)
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 10, 0)
         left_layout.setSpacing(8)
@@ -598,7 +634,7 @@ class MainWindow(QMainWindow):
         lay_tbl.setContentsMargins(5,15,5,5)
         
         self.tbl_metrics = QTableWidget(6, 4)
-        self.tbl_metrics.setFixedHeight(240) 
+        self.tbl_metrics.setMinimumHeight(200)
         self.tbl_metrics.setHorizontalHeaderLabels(["Metric", "PID", "SFMPC", "Improvement"])
         
         item_pid_hdr = QTableWidgetItem("PID")
@@ -704,15 +740,42 @@ class MainWindow(QMainWindow):
         self.btn_font_minus.clicked.connect(lambda: self._change_font_size(-10))
         self.btn_font_plus.clicked.connect(lambda: self._change_font_size(10))
 
+    def _setup_shortcuts(self):
+        # Tổ hợp phím Ctrl + (Zoom In) và Ctrl - (Zoom Out)
+        QShortcut(QKeySequence("Ctrl+="), self, lambda: self._change_font_size(10))
+        QShortcut(QKeySequence("Ctrl+-"), self, lambda: self._change_font_size(-10))
+        
+        # Phím Ctrl + 0 để reset về tỷ lệ tự động vừa màn hình
+        QShortcut(QKeySequence("Ctrl+0"), self, self._reset_zoom)
+
+    def _reset_zoom(self):
+        screen_height = QApplication.primaryScreen().availableGeometry().height()
+        self.font_pct = max(70, min(150, int((screen_height / 1080.0) * 100)))
+        self.lbl_font_val.setText(f"{self.font_pct}%")
+        self._apply_qss()
+
+    def wheelEvent(self, event: QWheelEvent):
+        # Bắt sự kiện khi người dùng giữ phím Ctrl và lăn chuột
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            angle = event.angleDelta().y()
+            if angle > 0:
+                self._change_font_size(5)  # Lăn lên: Phóng to (bước nhảy nhỏ gọn 5%)
+            elif angle < 0:
+                self._change_font_size(-5) # Lăn xuống: Thu nhỏ
+            event.accept()
+        else:
+            super().wheelEvent(event)
+
     def _on_time_slider_changed(self, val):
         self.lbl_time_val.setText(f"{val/10.0:.1f} s")
 
     def _change_font_size(self, delta):
-        self.font_pct = max(80, min(150, self.font_pct + delta))
+        self.font_pct = max(30, min(150, self.font_pct + delta))
         self.lbl_font_val.setText(f"{self.font_pct}%")
         self._apply_qss() 
 
     def _on_start_clicked(self):
+        time.sleep(1)
         mode = "BOTH"
         if self.btn_mode_pid.isChecked(): mode = "PID"
         elif self.btn_mode_mpc.isChecked(): mode = "MPC"
