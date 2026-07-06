@@ -1015,8 +1015,104 @@ class MainWindow(QMainWindow):
         except Exception as e: pass
 
     @Slot()
-    def on_save_preset(self): pass
+    def on_save_preset(self):
+        # Mở hộp thoại chọn nơi lưu file JSON
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Configuration", "", "JSON Files (*.json)")
+        if not file_path: 
+            return
+            
+        # Thu thập toàn bộ các thông số hiện tại trên giao diện
+        config_data = {
+            "omega_step": self.sp_omega_step.value(),
+            "t_omega": self.sp_t_omega.value(),
+            "tl_step": self.sp_tl_step.value(),
+            "disturbance": self.chk_disturbance.isChecked(),
+            "param_mismatch": self.chk_param_mismatch.isChecked(),
+            "kp": self.sp_kp.value(),
+            "ki": self.sp_ki.value(),
+            "kd": self.sp_kd.value(),
+            "np": self.sp_np.value(),
+            "nu": self.sp_nu.value(),
+            "ts_mpc": self.sp_ts_mpc.value(),
+            "q": self.sp_Q.value(),
+            "r": self.sp_R.value(),
+            "rd": self.sp_Rd.value(),
+            "sim_time": self.slider_time.value()
+        }
+        
+        # Ghi vào file
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, indent=4)
+            QMessageBox.information(self, "Success", "Configuration saved successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save config:\n{str(e)}")
+
     @Slot()
-    def on_load_preset(self): pass
+    def on_load_preset(self):
+        # Mở hộp thoại chọn file JSON để đọc
+        file_path, _ = QFileDialog.getOpenFileName(self, "Load Configuration", "", "JSON Files (*.json)")
+        if not file_path: 
+            return
+            
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+                
+            # Đổ dữ liệu từ file ngược lại lên UI (có kiểm tra key để tránh lỗi nếu file thiếu dữ liệu)
+            if "omega_step" in config_data: self.sp_omega_step.setValue(config_data["omega_step"])
+            if "t_omega" in config_data: self.sp_t_omega.setValue(config_data["t_omega"])
+            if "tl_step" in config_data: self.sp_tl_step.setValue(config_data["tl_step"])
+            if "disturbance" in config_data: self.chk_disturbance.setChecked(config_data["disturbance"])
+            if "param_mismatch" in config_data: self.chk_param_mismatch.setChecked(config_data["param_mismatch"])
+            
+            if "kp" in config_data: self.sp_kp.setValue(config_data["kp"])
+            if "ki" in config_data: self.sp_ki.setValue(config_data["ki"])
+            if "kd" in config_data: self.sp_kd.setValue(config_data["kd"])
+            
+            if "np" in config_data: self.sp_np.setValue(config_data["np"])
+            if "nu" in config_data: self.sp_nu.setValue(config_data["nu"])
+            if "ts_mpc" in config_data: self.sp_ts_mpc.setValue(config_data["ts_mpc"])
+            if "q" in config_data: self.sp_Q.setValue(config_data["q"])
+            if "r" in config_data: self.sp_R.setValue(config_data["r"])
+            if "rd" in config_data: self.sp_Rd.setValue(config_data["rd"])
+            
+            if "sim_time" in config_data: self.slider_time.setValue(config_data["sim_time"])
+            
+            QMessageBox.information(self, "Success", "Configuration loaded successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load config:\n{str(e)}")
+
     @Slot()
-    def on_export_bundle(self): pass
+    def on_export_bundle(self):
+        # Kiểm tra xem có dữ liệu nào để xuất không
+        if self.last_pid is None and self.last_mpc is None:
+            QMessageBox.warning(self, "No Data", "No simulation data to export. Please run a simulation first.")
+            return
+            
+        # Chọn thư mục để lưu các file CSV thay vì lưu 1 file (vì có nhiều dataframe: PID, MPC, Metrics)
+        dir_path = QFileDialog.getExistingDirectory(self, "Select Export Directory")
+        if not dir_path: 
+            return
+            
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        try:
+            # Xuất dữ liệu PID
+            if self.last_pid is not None and not self.last_pid.empty:
+                pid_path = os.path.join(dir_path, f"pid_data_{timestamp}.csv")
+                self.last_pid.to_csv(pid_path, index=False)
+                
+            # Xuất dữ liệu MPC
+            if self.last_mpc is not None and not self.last_mpc.empty:
+                mpc_path = os.path.join(dir_path, f"mpc_data_{timestamp}.csv")
+                self.last_mpc.to_csv(mpc_path, index=False)
+            
+            # Xuất luôn bảng Metrics tóm tắt
+            if self.last_metrics is not None and not self.last_metrics.empty:
+                metrics_path = os.path.join(dir_path, f"metrics_{timestamp}.csv")
+                self.last_metrics.to_csv(metrics_path, index=False)
+                
+            QMessageBox.information(self, "Success", f"Data exported successfully to:\n{dir_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export data:\n{str(e)}")
