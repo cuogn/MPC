@@ -28,6 +28,7 @@ class MainWindow(QMainWindow):
         self.profile_tl: list[tuple[float, float]] | None = None
         self.last_pid: pd.DataFrame | None = None
         self.last_mpc: pd.DataFrame | None = None
+        self.last_hybrid: pd.DataFrame | None = None # Thêm dòng này
         self.last_metrics: pd.DataFrame | None = None
         
         self.font_pct = 100 
@@ -248,8 +249,10 @@ class MainWindow(QMainWindow):
         QLabel.KPIName {{ color: #E2E8F0; font-size: {sz_small}px; font-weight: bold; }}
         QLabel.KPIHeaderPID {{ color: #E65F2B; font-size: {max(5, int((10*s)-1))}px; font-weight: bold; }}
         QLabel.KPIHeaderMPC {{ color: #48CAE4; font-size: {max(5, int((10*s)-1))}px; font-weight: bold; }}
+        QLabel.KPIHeaderHYB {{ color: #9B59B6; font-size: {max(5, int((10*s)-1))}px; font-weight: bold; }}
         QLabel.KPIValPID {{ color: #E65F2B; font-size: {sz_kpi}px; font-weight: bold; }}
         QLabel.KPIValMPC {{ color: #48CAE4; font-size: {sz_kpi}px; font-weight: bold; }}
+        QLabel.KPIValHYB {{ color: #9B59B6; font-size: {sz_kpi}px; font-weight: bold; }}
         QLabel.KPIImp {{ color: #7F8C8D; font-size: {sz_small}px; font-weight: bold; }}
         """
         self.setStyleSheet(dark_qss)
@@ -305,15 +308,16 @@ class MainWindow(QMainWindow):
         mode_layout.addWidget(QLabel("Mode: "))
         
         self.mode_group = QButtonGroup(self)
-        self.btn_mode_pid = QPushButton("PID Only")
-        self.btn_mode_mpc = QPushButton("SFMPC Only")
-        self.btn_mode_both = QPushButton("Compare (PID vs SFMPC)")
+        self.btn_mode_pid = QPushButton("PID")
+        self.btn_mode_mpc = QPushButton("SFMPC")
+        self.btn_mode_hyb = QPushButton("HYBRID") # Nút mới
+        self.btn_mode_all = QPushButton("Compare All") # Nút mới
         
-        for idx, btn in enumerate([self.btn_mode_pid, self.btn_mode_mpc, self.btn_mode_both]):
+        for idx, btn in enumerate([self.btn_mode_pid, self.btn_mode_mpc, self.btn_mode_hyb, self.btn_mode_all]):
             btn.setCheckable(True); btn.setObjectName("btnMode")
             self.mode_group.addButton(btn, idx)
             mode_layout.addWidget(btn)
-        self.btn_mode_both.setChecked(True)
+        self.btn_mode_all.setChecked(True)
         self.mode_group.buttonClicked.connect(self._update_mode_style)
         
         header_layout.addWidget(mode_container)
@@ -493,7 +497,7 @@ class MainWindow(QMainWindow):
         center_layout = QVBoxLayout()
         center_layout.setSpacing(8)
         
-        grp_kpi = QGroupBox("SUMMARY INDICATORS (Compare PID vs SFMPC)")
+        grp_kpi = QGroupBox("SUMMARY INDICATORS (PID vs SFMPC vs HYBRID)")
         lay_kpi = QHBoxLayout(grp_kpi)
         
         self.kpi_labels = {}
@@ -509,19 +513,25 @@ class MainWindow(QMainWindow):
             lbl_name = QLabel(name); lbl_name.setProperty("class", "KPIName")
             lbl_name.setAlignment(Qt.AlignCenter)
             
+            # --- Cập nhật 3 Header (PID, SFMPC, HYBRID) ---
             sub_hdr_lay = QHBoxLayout()
             lbl_hdr_pid = QLabel("PID"); lbl_hdr_pid.setProperty("class", "KPIHeaderPID")
             lbl_hdr_pid.setAlignment(Qt.AlignCenter)
             lbl_hdr_mpc = QLabel("SFMPC"); lbl_hdr_mpc.setProperty("class", "KPIHeaderMPC")
             lbl_hdr_mpc.setAlignment(Qt.AlignCenter)
-            sub_hdr_lay.addWidget(lbl_hdr_pid); sub_hdr_lay.addWidget(lbl_hdr_mpc)
+            lbl_hdr_hyb = QLabel("HYBRID"); lbl_hdr_hyb.setProperty("class", "KPIHeaderHYB")
+            lbl_hdr_hyb.setAlignment(Qt.AlignCenter)
+            sub_hdr_lay.addWidget(lbl_hdr_pid); sub_hdr_lay.addWidget(lbl_hdr_mpc); sub_hdr_lay.addWidget(lbl_hdr_hyb)
             
+            # --- Cập nhật 3 Value (PID, SFMPC, HYBRID) ---
             val_lay = QHBoxLayout()
             lbl_pid = QLabel("0.0"); lbl_pid.setProperty("class", "KPIValPID")
             lbl_pid.setAlignment(Qt.AlignCenter)
             lbl_mpc = QLabel("0.0"); lbl_mpc.setProperty("class", "KPIValMPC")
             lbl_mpc.setAlignment(Qt.AlignCenter)
-            val_lay.addWidget(lbl_pid); val_lay.addWidget(lbl_mpc)
+            lbl_hyb = QLabel("0.0"); lbl_hyb.setProperty("class", "KPIValHYB")
+            lbl_hyb.setAlignment(Qt.AlignCenter)
+            val_lay.addWidget(lbl_pid); val_lay.addWidget(lbl_mpc); val_lay.addWidget(lbl_hyb)
             
             lbl_imp = QLabel("▼ 0.0%"); lbl_imp.setProperty("class", "KPIImp")
             lbl_imp.setAlignment(Qt.AlignCenter)
@@ -531,7 +541,8 @@ class MainWindow(QMainWindow):
             c_lay.addLayout(val_lay)
             c_lay.addWidget(lbl_imp)
             
-            self.kpi_labels[name] = {'pid': lbl_pid, 'mpc': lbl_mpc, 'imp': lbl_imp}
+            # Lưu lại cả lbl_hyb vào từ điển để tí nữa update số
+            self.kpi_labels[name] = {'pid': lbl_pid, 'mpc': lbl_mpc, 'hyb': lbl_hyb, 'imp': lbl_imp}
             lay_kpi.addWidget(card)
             
         center_layout.addWidget(grp_kpi)
@@ -543,9 +554,9 @@ class MainWindow(QMainWindow):
 
         pen_pid = pg.mkPen(color='#E65F2B', width=2.5)   
         pen_mpc = pg.mkPen(color='#48CAE4', width=2.5)   
-        pen_ref = pg.mkPen(color='#FFFFFF', width=2.0, style=Qt.DashLine) 
-        pen_lim = pg.mkPen(color='#F1C40F', width=1.5, style=Qt.DashLine) 
-        
+        pen_hyb = pg.mkPen(color='#9B59B6', width=2.5)  # Màu tím cho Hybrid
+        pen_ref = pg.mkPen(color='#FFFFFF', width=2.0, style=Qt.DashLine)
+        pen_lim = pg.mkPen(color='#F1C40F', width=1.5, style=Qt.DashLine)
         def wrap_plot(plot_widget):
             container = QWidget(); container.setObjectName("PlotContainer")
             lay = QVBoxLayout(container); lay.setContentsMargins(5, 5, 5, 5) 
@@ -563,9 +574,11 @@ class MainWindow(QMainWindow):
         self.curve_omega_ref = self.plot_speed.plot([], [], pen=pen_ref)
         self.curve_omega_pid = self.plot_speed.plot([], [], pen=pen_pid)
         self.curve_omega_mpc = self.plot_speed.plot([], [], pen=pen_mpc)
+        self.curve_omega_hyb = self.plot_speed.plot([], [], pen=pen_hyb) # Thêm Hybrid
         leg1.addItem(self.curve_omega_ref, "Reference")
         leg1.addItem(self.curve_omega_pid, "PID")
         leg1.addItem(self.curve_omega_mpc, "SFMPC")
+        leg1.addItem(self.curve_omega_hyb, "HYBRID")
         
         self.plot_err = pg.PlotWidget()
         self.plot_err.setLabel("left", "Error (rpm)", **{"color": "#7F8C8D"})
@@ -575,12 +588,15 @@ class MainWindow(QMainWindow):
         leg2.setParentItem(self.plot_err.graphicsItem())
         leg2.anchor((1, 0), (1, 0), offset=(-5, 10))
         
+        # Tương tự cho plot_err
         self.curve_err_pid = self.plot_err.plot([], [], pen=pen_pid)
         self.curve_err_mpc = self.plot_err.plot([], [], pen=pen_mpc)
+        self.curve_err_hyb = self.plot_err.plot([], [], pen=pen_hyb) # Thêm Hybrid
         self.curve_err_band_p = self.plot_err.plot([], [], pen=pen_ref)
         self.curve_err_band_n = self.plot_err.plot([], [], pen=pen_ref)
         leg2.addItem(self.curve_err_pid, "PID Error")
         leg2.addItem(self.curve_err_mpc, "SFMPC Error")
+        leg2.addItem(self.curve_err_hyb, "HYBRID Error")
         leg2.addItem(self.curve_err_band_p, "± 5 rpm")
 
         self.plot_iq = pg.PlotWidget()
@@ -592,12 +608,15 @@ class MainWindow(QMainWindow):
         leg3.setParentItem(self.plot_iq.graphicsItem())
         leg3.anchor((1, 0), (1, 0), offset=(-5, 10))
         
+        # Tương tự cho plot_iq
         self.curve_iq_pid = self.plot_iq.plot([], [], pen=pen_pid)
         self.curve_iq_mpc = self.plot_iq.plot([], [], pen=pen_mpc)
+        self.curve_iq_hyb = self.plot_iq.plot([], [], pen=pen_hyb) # Thêm Hybrid
         self.curve_tl_load = self.plot_iq.plot([], [], pen=pen_lim)
-        leg3.addItem(self.curve_iq_pid, "PID Torque")
-        leg3.addItem(self.curve_iq_mpc, "SFMPC Torque")
-        leg3.addItem(self.curve_tl_load, "Load Torque")
+        leg3.addItem(self.curve_iq_pid, "PID")
+        leg3.addItem(self.curve_iq_mpc, "SFMPC")
+        leg3.addItem(self.curve_iq_hyb, "HYBRID")
+        leg3.addItem(self.curve_tl_load, "Load")
 
         lay_realtime.addWidget(wrap_plot(self.plot_speed), 1)
         lay_realtime.addWidget(wrap_plot(self.plot_err), 1)
@@ -635,8 +654,16 @@ class MainWindow(QMainWindow):
         
         self.tbl_metrics = QTableWidget(6, 4)
         self.tbl_metrics.setMinimumHeight(200)
-        self.tbl_metrics.setHorizontalHeaderLabels(["Metric", "PID", "SFMPC", "Improvement"])
+        self.tbl_metrics.setHorizontalHeaderLabels(["Metric", "PID", "SFMPC", "HYBRID"])
         
+        item_pid = QTableWidgetItem("PID"); item_pid.setForeground(pg.mkColor('#E65F2B'))
+        item_mpc = QTableWidgetItem("SFMPC"); item_mpc.setForeground(pg.mkColor('#48CAE4'))
+        item_hyb = QTableWidgetItem("HYBRID"); item_hyb.setForeground(pg.mkColor('#9B59B6'))
+        
+        self.tbl_metrics.setHorizontalHeaderItem(1, item_pid)
+        self.tbl_metrics.setHorizontalHeaderItem(2, item_mpc)
+        self.tbl_metrics.setHorizontalHeaderItem(3, item_hyb)
+
         item_pid_hdr = QTableWidgetItem("PID")
         item_pid_hdr.setForeground(pg.mkColor('#E65F2B'))
         self.tbl_metrics.setHorizontalHeaderItem(1, item_pid_hdr)
@@ -663,23 +690,29 @@ class MainWindow(QMainWindow):
         lay_status = QVBoxLayout(grp_status)
         lay_status.setContentsMargins(5,15,5,5)
         
-        self.tbl_status = QTableWidget(10, 2)
+        # Tăng từ 10 lên 11 hàng
+        self.tbl_status = QTableWidget(11, 2)
         self.tbl_status.verticalHeader().setVisible(False)
         self.tbl_status.horizontalHeader().setVisible(False)
         self.tbl_status.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         
         self.tbl_status.verticalHeader().setContentsMargins(0,0,0,0)
-        for row_idx in range(9):
+        # Resize lại cho 10 hàng đầu, hàng cuối Stretch
+        for row_idx in range(10):
             self.tbl_status.verticalHeader().setSectionResizeMode(row_idx, QHeaderView.ResizeToContents)
-        self.tbl_status.verticalHeader().setSectionResizeMode(9, QHeaderView.Stretch) 
+        self.tbl_status.verticalHeader().setSectionResizeMode(10, QHeaderView.Stretch) 
         self.tbl_status.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tbl_status.setShowGrid(True)
         
+        # Thêm (Actual Speed HYBRID) vào danh sách
         self.status_keys_list = [
-            ("Controller Mode", "COMPARE (PID vs SFMPC)"), ("Simulation State", "READY"),
+            ("Controller Mode", "COMPARE ALL"), ("Simulation State", "READY"),
             ("Sim. Time", "0.00 s"), ("Sampling Time", "0.0010 s"),
-            ("Reference Speed", "1500.0 rpm"), ("Actual Speed (PID)", "0.0 rpm"),
-            ("Actual Speed (SFMPC)", "0.0 rpm"), ("Torque (Est.)", "0.0 N·m"),
+            ("Reference Speed", "1500.0 rpm"), 
+            ("Actual Speed (PID)", "0.0 rpm"),
+            ("Actual Speed (SFMPC)", "0.0 rpm"), 
+            ("Actual Speed (HYBRID)", "0.0 rpm"), # <-- Dòng mới thêm
+            ("Torque (Est.)", "0.0 N·m"),
             ("Worker State", "Idle"), ("Data Logging", "ON")
         ]
         
@@ -717,15 +750,20 @@ class MainWindow(QMainWindow):
         self._update_mode_style()
 
     def _update_mode_style(self):
-        for btn in [self.btn_mode_pid, self.btn_mode_mpc, self.btn_mode_both]:
-            if btn.isChecked(): btn.setObjectName("btnModeActive")
-            else: btn.setObjectName("btnMode")
-            btn.style().unpolish(btn); btn.style().polish(btn)
+        # Cập nhật lại danh sách nút bấm mới tại đây
+        for btn in [self.btn_mode_pid, self.btn_mode_mpc, self.btn_mode_hyb, self.btn_mode_all]:
+            if btn.isChecked(): 
+                btn.setObjectName("btnModeActive")
+            else: 
+                btn.setObjectName("btnMode")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
         
         if hasattr(self, 'tbl_status'):
-            mode_text = "COMPARE (PID vs SFMPC)"
+            mode_text = "COMPARE ALL"
             if self.btn_mode_pid.isChecked(): mode_text = "PID ONLY"
             elif self.btn_mode_mpc.isChecked(): mode_text = "SFMPC ONLY"
+            elif self.btn_mode_hyb.isChecked(): mode_text = "HYBRID ONLY"
             self.tbl_status.item(0, 1).setText(mode_text)
 
     def _connect(self):
@@ -776,9 +814,10 @@ class MainWindow(QMainWindow):
 
     def _on_start_clicked(self):
         time.sleep(1)
-        mode = "BOTH"
+        mode = "COMPARE" # Mặc định là Compare All
         if self.btn_mode_pid.isChecked(): mode = "PID"
         elif self.btn_mode_mpc.isChecked(): mode = "MPC"
+        elif self.btn_mode_hyb.isChecked(): mode = "HYBRID"
         self._run(mode)
 
     def _worker_active(self) -> bool:
@@ -805,8 +844,8 @@ class MainWindow(QMainWindow):
             self.tbl_status.item(1, 1).setText(state_txt)
             self.tbl_status.item(1, 1).setForeground(pg.mkColor(color))
             w_state = "Active" if running else "Idle"
-            self.tbl_status.item(8, 1).setText(w_state)
-            self.tbl_status.item(8, 1).setForeground(pg.mkColor(color))
+            self.tbl_status.item(9, 1).setText(w_state)
+            self.tbl_status.item(9, 1).setForeground(pg.mkColor(color))
 
     def _gather_config(self) -> SimConfig:
         tl_val = float(self.sp_tl_step.value()) if self.chk_disturbance.isChecked() else 0.0
@@ -859,25 +898,26 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_reset(self):
         if self.worker: self.worker.stop()
-        self.last_pid = None; self.last_mpc = None; self.last_metrics = None
-        for c in (self.curve_omega_pid, self.curve_omega_mpc, self.curve_omega_ref, 
-                  self.curve_iq_pid, self.curve_iq_mpc, self.curve_tl_load,
-                  self.curve_err_pid, self.curve_err_mpc, self.curve_err_band_p, self.curve_err_band_n):
+        self.last_pid = None; self.last_mpc = None; self.last_hybrid = None; self.last_metrics = None
+        for c in (self.curve_omega_pid, self.curve_omega_mpc, self.curve_omega_hyb, self.curve_omega_ref, 
+                  self.curve_iq_pid, self.curve_iq_mpc, self.curve_iq_hyb, self.curve_tl_load,
+                  self.curve_err_pid, self.curve_err_mpc, self.curve_err_hyb, self.curve_err_band_p, self.curve_err_band_n):
             c.setData([], [])
         
         self.lbl_top_time.setText("Sim. Time: 0.00 s")
-        self.tbl_status.item(2, 1).setText("0.00 s")
         self.tbl_status.item(4, 1).setText("0.0 rpm")
         self.tbl_status.item(5, 1).setText("0.0 rpm")
         self.tbl_status.item(6, 1).setText("0.0 rpm")
-        self.tbl_status.item(7, 1).setText("0.0 N·m")
+        self.tbl_status.item(7, 1).setText("0.0 rpm") # Thêm dòng Reset HYBRID
+        self.tbl_status.item(8, 1).setText("0.0 N·m") # Torque đẩy xuống dòng 8
         
         self._reset_metrics_ui()
         self._update_enable()
 
     def _reset_metrics_ui(self):
         for name, lbls in self.kpi_labels.items():
-            lbls['pid'].setText("0.0"); lbls['mpc'].setText("0.0"); lbls['imp'].setText("▼ 0.0%")
+            # Thêm lbls['hyb'].setText("0.0")
+            lbls['pid'].setText("0.0"); lbls['mpc'].setText("0.0"); lbls['hyb'].setText("0.0"); lbls['imp'].setText("▼ 0.0%")
             lbls['imp'].setStyleSheet("color: #7F8C8D; font-weight: bold;")
         for row in range(self.tbl_metrics.rowCount()):
             for col in range(1, 4):
@@ -898,7 +938,6 @@ class MainWindow(QMainWindow):
             if len(t) == 0 or len(w) == 0 or len(t_ref_arr) == 0: return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             
             ref_interp = np.interp(t, t_ref_arr, omega_ref_arr)
-            
             rmse = np.sqrt(np.mean((ref_interp - w)**2))
             max_w = np.max(w)
             overshoot = max(0.0, (max_w - ref_val) / ref_val * 100.0)
@@ -915,9 +954,11 @@ class MainWindow(QMainWindow):
 
         pid_m = calc_signals(payload.get("t_pid", []), payload.get("omega_pid", []), payload.get("iqref_pid", []))
         mpc_m = calc_signals(payload.get("t_mpc", []), payload.get("omega_mpc", []), payload.get("iqref_mpc", []))
+        hyb_m = calc_signals(payload.get("t_hybrid", []), payload.get("omega_hybrid", []), payload.get("iqref_hybrid", []))
         
         rows = []
-        for idx, name in enumerate(self.metrics_keys): rows.append({"Metric": name, "PID": pid_m[idx], "MPC": mpc_m[idx]})
+        for idx, name in enumerate(self.metrics_keys): 
+            rows.append({"Metric": name, "PID": pid_m[idx], "MPC": mpc_m[idx], "HYBRID": hyb_m[idx]})
         return pd.DataFrame(rows)
 
     @Slot(dict)
@@ -930,6 +971,7 @@ class MainWindow(QMainWindow):
             
         has_pid = len(payload.get("t_pid", [])) > 0
         has_mpc = len(payload.get("t_mpc", [])) > 0
+        has_hyb = len(payload.get("t_hybrid", [])) > 0
 
         if has_pid:
             self.curve_omega_pid.setData(payload["t_pid"], payload["omega_pid"])
@@ -937,21 +979,19 @@ class MainWindow(QMainWindow):
         if has_mpc:
             self.curve_omega_mpc.setData(payload["t_mpc"], payload["omega_mpc"])
             self.curve_iq_mpc.setData(payload["t_mpc"], payload["iqref_mpc"])
+        if has_hyb:
+            self.curve_omega_hyb.setData(payload["t_hybrid"], payload["omega_hybrid"])
+            self.curve_iq_hyb.setData(payload["t_hybrid"], payload["iqref_hybrid"])
 
         t_candidates = []
-        if has_pid and len(t_ref_arr) > 0:
-            t_pid = np.array(payload["t_pid"])
-            omega_pid = np.array(payload["omega_pid"])
-            ref_interp_pid = np.interp(t_pid, t_ref_arr, omega_ref_arr)
-            self.curve_err_pid.setData(t_pid, ref_interp_pid - omega_pid)
-            t_candidates.append(float(t_pid[-1]))
-
-        if has_mpc and len(t_ref_arr) > 0:
-            t_mpc = np.array(payload["t_mpc"])
-            omega_mpc = np.array(payload["omega_mpc"])
-            ref_interp_mpc = np.interp(t_mpc, t_ref_arr, omega_ref_arr)
-            self.curve_err_mpc.setData(t_mpc, ref_interp_mpc - omega_mpc)
-            t_candidates.append(float(t_mpc[-1]))
+        # Xóa đoạn code thừa cũ, chỉ giữ vòng lặp này để vẽ đồ thị Error (Tracking Error)
+        for prefix in ["pid", "mpc", "hybrid"]:
+            if payload.get(f"t_{prefix}", []).size > 0 and len(t_ref_arr) > 0:
+                t_arr = np.array(payload[f"t_{prefix}"])
+                w_arr = np.array(payload[f"omega_{prefix}"])
+                ref_int = np.interp(t_arr, t_ref_arr, omega_ref_arr)
+                getattr(self, f"curve_err_{prefix[:3]}").setData(t_arr, ref_int - w_arr)
+                t_candidates.append(float(t_arr[-1]))
 
         t_end_val = self.slider_time.value() / 10.0
         tmax = max(t_candidates) if t_candidates else t_end_val
@@ -966,20 +1006,30 @@ class MainWindow(QMainWindow):
 
         def last(arr): return float(arr[-1]) if hasattr(arr, "__len__") and len(arr) else 0.0
         rpm_ref = float(omega_ref_arr[-1]) if len(omega_ref_arr) > 0 else 0.0
-        rpm_pid, rpm_mpc = last(payload.get("omega_pid", [])), last(payload.get("omega_mpc", []))
+        rpm_pid, rpm_mpc, rpm_hyb = last(payload.get("omega_pid", [])), last(payload.get("omega_mpc", [])), last(payload.get("omega_hybrid", []))
         
         self.tbl_status.item(4, 1).setText(f"{rpm_ref:.1f} rpm")
         self.tbl_status.item(5, 1).setText(f"{rpm_pid:.1f} rpm")
         self.tbl_status.item(6, 1).setText(f"{rpm_mpc:.1f} rpm")
-        self.tbl_status.item(7, 1).setText(f"{max(last(payload.get('iqref_pid', [])), last(payload.get('iqref_mpc', []))):.2f} N·m")
+        self.tbl_status.item(7, 1).setText(f"{rpm_hyb:.1f} rpm") # Tốc độ Hybrid
+        self.tbl_status.item(8, 1).setText(f"{max(last(payload.get('iqref_pid', [])), last(payload.get('iqref_mpc', [])), last(payload.get('iqref_hybrid', []))):.2f} N·m") # Torque đẩy xuống dòng 8
 
         self._update_metrics_ui(self._calculate_realtime_metrics(payload))
 
     @Slot(dict)
     def on_done(self, payload: dict):
-        self.last_pid = payload.get("pid"); self.last_mpc = payload.get("mpc"); self.last_metrics = payload.get("metrics")
-        if self.last_metrics is not None and not self.last_metrics.empty: self._update_metrics_ui(self.last_metrics)
-        self._thread_active = False; self.worker = None; self._update_enable()
+        # Lấy dữ liệu của cả 3 thuật toán và metrics
+        self.last_pid = payload.get("pid")
+        self.last_mpc = payload.get("mpc")
+        self.last_hybrid = payload.get("hybrid")  # <-- THÊM DÒNG NÀY ĐỂ BẮT DỮ LIỆU HYBRID
+        self.last_metrics = payload.get("metrics")
+        
+        if self.last_metrics is not None and not self.last_metrics.empty: 
+            self._update_metrics_ui(self.last_metrics)
+            
+        self._thread_active = False
+        self.worker = None
+        self._update_enable()
 
     def _update_metrics_ui(self, df: pd.DataFrame):
         try:
@@ -988,30 +1038,27 @@ class MainWindow(QMainWindow):
                 metric_name = str(row_data.get('Metric', self.metrics_keys[i] if i < len(self.metrics_keys) else ''))
                 self.tbl_metrics.item(i, 0).setText(metric_name)
 
-                pid_val_num = float(row_data.get('PID', 0.0))
-                mpc_val_num = float(row_data.get('MPC', 0.0))
-                pid_str = f"{pid_val_num:.2f}"; mpc_str = f"{mpc_val_num:.2f}"
+                pid_str = f"{float(row_data.get('PID', 0.0)):.2f}"
+                mpc_str = f"{float(row_data.get('MPC', 0.0)):.2f}"
+                hyb_str = f"{float(row_data.get('HYBRID', 0.0)):.2f}"
                 
                 self.tbl_metrics.item(i, 1).setText(pid_str); self.tbl_metrics.item(i, 1).setForeground(pg.mkColor('#E65F2B'))
                 self.tbl_metrics.item(i, 2).setText(mpc_str); self.tbl_metrics.item(i, 2).setForeground(pg.mkColor('#48CAE4'))
-
-                color_imp = '#16A34A'
-                arrow = "▼"
-                if pid_val_num != 0:
-                    imp_val = ((pid_val_num - mpc_val_num) / pid_val_num) * 100.0
-                    if imp_val < 0: arrow = "▲"; color_imp = '#E74C3C'
-                    imp_str = f"{arrow} {abs(imp_val):.1f}%"
-                else:
-                    imp_str = "0.0%" if mpc_val_num == 0 else "▲ 100%"
-                    if mpc_val_num > 0: color_imp = '#E74C3C'
-
-                self.tbl_metrics.item(i, 3).setText(imp_str)
-                self.tbl_metrics.item(i, 3).setForeground(pg.mkColor(color_imp))
+                
+                # Check và tạo ô nếu chưa có cho cột HYBRID
+                item_hyb = self.tbl_metrics.item(i, 3)
+                if not item_hyb:
+                    item_hyb = QTableWidgetItem()
+                    item_hyb.setTextAlignment(Qt.AlignCenter)
+                    self.tbl_metrics.setItem(i, 3, item_hyb)
+                item_hyb.setText(hyb_str)
+                item_hyb.setForeground(pg.mkColor('#9B59B6'))
 
                 for k_name, lbl_dict in self.kpi_labels.items():
                     if k_name.split(' ')[0].lower() in metric_name.lower():
-                        lbl_dict['pid'].setText(pid_str); lbl_dict['mpc'].setText(mpc_str); lbl_dict['imp'].setText(imp_str)
-                        lbl_dict['imp'].setStyleSheet(f"color: {color_imp}; font-weight: bold;")
+                        lbl_dict['pid'].setText(pid_str)
+                        lbl_dict['mpc'].setText(mpc_str)
+                        lbl_dict['hyb'].setText(hyb_str)
         except Exception as e: pass
 
     @Slot()
@@ -1086,11 +1133,10 @@ class MainWindow(QMainWindow):
     @Slot()
     def on_export_bundle(self):
         # Kiểm tra xem có dữ liệu nào để xuất không
-        if self.last_pid is None and self.last_mpc is None:
+        if self.last_pid is None and self.last_mpc is None and self.last_hybrid is None:
             QMessageBox.warning(self, "No Data", "No simulation data to export. Please run a simulation first.")
             return
             
-        # Chọn thư mục để lưu các file CSV thay vì lưu 1 file (vì có nhiều dataframe: PID, MPC, Metrics)
         dir_path = QFileDialog.getExistingDirectory(self, "Select Export Directory")
         if not dir_path: 
             return
@@ -1098,17 +1144,19 @@ class MainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         try:
-            # Xuất dữ liệu PID
             if self.last_pid is not None and not self.last_pid.empty:
                 pid_path = os.path.join(dir_path, f"pid_data_{timestamp}.csv")
                 self.last_pid.to_csv(pid_path, index=False)
                 
-            # Xuất dữ liệu MPC
             if self.last_mpc is not None and not self.last_mpc.empty:
                 mpc_path = os.path.join(dir_path, f"mpc_data_{timestamp}.csv")
                 self.last_mpc.to_csv(mpc_path, index=False)
+
+            # --- Thêm xuất dữ liệu HYBRID ---
+            if self.last_hybrid is not None and not self.last_hybrid.empty:
+                hyb_path = os.path.join(dir_path, f"hybrid_data_{timestamp}.csv")
+                self.last_hybrid.to_csv(hyb_path, index=False)
             
-            # Xuất luôn bảng Metrics tóm tắt
             if self.last_metrics is not None and not self.last_metrics.empty:
                 metrics_path = os.path.join(dir_path, f"metrics_{timestamp}.csv")
                 self.last_metrics.to_csv(metrics_path, index=False)
